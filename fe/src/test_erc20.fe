@@ -1,0 +1,125 @@
+use std::abi::sol
+use std::evm::{Address, Ctx, Evm, RawMem, StorageMap}
+
+const TRANSFER_TOPIC: u256 = 0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef
+const APPROVAL_TOPIC: u256 = 0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925
+
+msg TestERC20Msg {
+    #[selector = sol("balanceOf(address)")]
+    BalanceOf { owner: Address } -> u256,
+
+    #[selector = sol("allowance(address,address)")]
+    Allowance { owner: Address, spender: Address } -> u256,
+
+    #[selector = sol("mint(address,uint256)")]
+    Mint { to: Address, amount: u256 },
+
+    #[selector = sol("transfer(address,uint256)")]
+    Transfer { recipient: Address, amount: u256 } -> bool,
+
+    #[selector = sol("approve(address,uint256)")]
+    Approve { spender: Address, amount: u256 } -> bool,
+
+    #[selector = sol("transferFrom(address,address,uint256)")]
+    TransferFrom { sender: Address, recipient: Address, amount: u256 } -> bool,
+}
+
+struct TestERC20Store {
+    balances: StorageMap<Address, u256>,
+    allowances: StorageMap<(Address, Address), u256>,
+}
+
+fn emit_transfer(from: Address, to: Address, amount: u256) uses (evm: mut Evm) {
+    let ptr = std::evm::mem::alloc(0)
+    evm.mstore(addr: ptr, value: amount)
+    evm.log3(
+        offset: ptr,
+        len: 32,
+        topic0: TRANSFER_TOPIC,
+        topic1: from.inner,
+        topic2: to.inner,
+    )
+}
+
+fn emit_approval(owner: Address, spender: Address, amount: u256)
+uses (evm: mut Evm)
+{
+    let ptr = std::evm::mem::alloc(0)
+    evm.mstore(addr: ptr, value: amount)
+    evm.log3(
+        offset: ptr,
+        len: 32,
+        topic0: APPROVAL_TOPIC,
+        topic1: owner.inner,
+        topic2: spender.inner,
+    )
+}
+
+fn mint_to(to: Address, amount: u256) uses (store: mut TestERC20Store) {
+    let balance_next = store.balances.get(to) + amount
+    assert(balance_next >= amount)
+    store.balances.set(key: to, value: balance_next)
+}
+
+fn transfer_tokens(from: Address, to: Address, amount: u256)
+uses (store: mut TestERC20Store, evm: mut Evm)
+{
+    let balance_before = store.balances.get(from)
+    assert(balance_before >= amount)
+    store.balances.set(key: from, value: balance_before - amount)
+
+    let balance_recipient = store.balances.get(to)
+    assert(balance_recipient + amount >= balance_recipient)
+    store.balances.set(key: to, value: balance_recipient + amount)
+
+    emit_transfer(from, to, amount)
+}
+
+pub contract TestERC20 uses (ctx: Ctx, evm: mut Evm) {
+    mut store: TestERC20Store,
+
+    init(amount_to_mint: u256)
+    uses (ctx, mut store)
+    {
+        mint_to(to: ctx.caller(), amount: amount_to_mint)
+    }
+
+    recv TestERC20Msg {
+        BalanceOf { owner } -> u256 uses (store) {
+            store.balances.get(owner)
+        }
+
+        Allowance { owner, spender } -> u256 uses (store) {
+            store.allowances.get((owner, spender))
+        }
+
+        Mint { to, amount } uses (mut store) {
+            mint_to(to, amount)
+        }
+
+        Transfer { recipient, amount } -> bool uses (ctx, mut evm, mut store) {
+            transfer_tokens(from: ctx.caller(), to: recipient, amount)
+            true
+        }
+
+        Approve { spender, amount } -> bool uses (ctx, mut evm, mut store) {
+            let owner = ctx.caller()
+            store.allowances.set(key: (owner, spender), value: amount)
+            emit_approval(owner, spender, amount)
+            true
+        }
+
+        TransferFrom { sender, recipient, amount } -> bool
+        uses (ctx, mut evm, mut store)
+        {
+            let allowance_before = store.allowances.get((sender, ctx.caller()))
+            assert(allowance_before >= amount)
+            store.allowances.set(
+                    key: (sender, ctx.caller()),
+                    value: allowance_before - amount,
+                )
+            transfer_tokens(from: sender, to: recipient, amount)
+            true
+        }
+    }
+}
