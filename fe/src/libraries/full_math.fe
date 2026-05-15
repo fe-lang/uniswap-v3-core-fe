@@ -1,0 +1,70 @@
+use std::abi::sol
+use std::evm::crypto::mulmod
+
+const U256_MAX: u256 = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+
+#[arithmetic(unchecked)]
+pub fn mul_div(_ a: u256, _ b: u256, _ denominator: u256) -> u256 {
+    let mm = mulmod(a, b, U256_MAX)
+    let mut prod0 = a * b
+    let mut prod1 = (mm - prod0) - if mm < prod0 { 1 } else { 0 }
+
+    if prod1 == 0 {
+        assert(denominator > 0)
+        return prod0 / denominator
+    }
+
+    assert(denominator > prod1)
+
+    let remainder = mulmod(a, b, denominator)
+    prod1 = prod1 - if remainder > prod0 { 1 } else { 0 }
+    prod0 = prod0 - remainder
+
+    let twos = (0 - denominator) & denominator
+    let exact_denominator = denominator / twos
+    prod0 = prod0 / twos
+    let flipped_twos = ((0 - twos) / twos) + 1
+
+    prod0 = prod0 | (prod1 * flipped_twos)
+
+    let mut inv = (3 * exact_denominator) ^ 2
+    inv = inv * (2 - (exact_denominator * inv))
+    inv = inv * (2 - (exact_denominator * inv))
+    inv = inv * (2 - (exact_denominator * inv))
+    inv = inv * (2 - (exact_denominator * inv))
+    inv = inv * (2 - (exact_denominator * inv))
+    inv = inv * (2 - (exact_denominator * inv))
+
+    prod0 * inv
+}
+
+#[arithmetic(unchecked)]
+pub fn mul_div_rounding_up(_ a: u256, _ b: u256, _ denominator: u256) -> u256 {
+    let mut result = mul_div(a, b, denominator)
+    if mulmod(a, b, denominator) > 0 {
+        assert(result < U256_MAX)
+        result = result + 1
+    }
+
+    result
+}
+
+msg FullMathTestMsg {
+    #[selector = sol("mulDiv(uint256,uint256,uint256)")]
+    MulDiv { x: u256, y: u256, z: u256 } -> u256,
+
+    #[selector = sol("mulDivRoundingUp(uint256,uint256,uint256)")]
+    MulDivRoundingUp { x: u256, y: u256, z: u256 } -> u256,
+}
+
+pub contract FullMathTest {
+    recv FullMathTestMsg {
+        MulDiv { x, y, z } -> u256 {
+            mul_div(x, y, z)
+        }
+
+        MulDivRoundingUp { x, y, z } -> u256 {
+            mul_div_rounding_up(x, y, z)
+        }
+    }
+}
