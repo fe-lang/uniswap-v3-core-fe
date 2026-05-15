@@ -27,6 +27,43 @@ const oracleInitializeParamsComponents = [
 ]
 
 const abiOverrides = {
+  NoDelegateCallTest: [
+    {
+      type: 'function',
+      name: 'canBeDelegateCalled',
+      inputs: [],
+      outputs: [{ name: '', type: 'uint256' }],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
+      name: 'cannotBeDelegateCalled',
+      inputs: [],
+      outputs: [{ name: '', type: 'uint256' }],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
+      name: 'getGasCostOfCanBeDelegateCalled',
+      inputs: [],
+      outputs: [{ name: '', type: 'uint256' }],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
+      name: 'getGasCostOfCannotBeDelegateCalled',
+      inputs: [],
+      outputs: [{ name: '', type: 'uint256' }],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
+      name: 'callsIntoNoDelegateCallFunction',
+      inputs: [],
+      outputs: [],
+      stateMutability: 'view',
+    },
+  ],
   OracleTest: [
     {
       type: 'function',

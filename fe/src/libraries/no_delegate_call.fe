@@ -1,0 +1,69 @@
+use std::evm::{Ctx, Evm, RawStorage}
+
+const ORIGINAL_SLOT: u256 = 0
+
+fn check_not_delegate_call() uses (ctx: Ctx, evm: Evm) {
+    assert(ctx.address().inner == evm.sload(ORIGINAL_SLOT))
+}
+
+fn can_be_delegate_called() -> u256 uses (ctx: Ctx) {
+    ctx.timestamp() / 5
+}
+
+fn cannot_be_delegate_called() -> u256 uses (ctx: Ctx, evm: Evm) {
+    check_not_delegate_call()
+    can_be_delegate_called()
+}
+
+fn no_delegate_call_private() uses (ctx: Ctx, evm: Evm) {
+    check_not_delegate_call()
+}
+
+msg NoDelegateCallTestMsg {
+    #[selector = 0xf45f416e]
+    CanBeDelegateCalled -> u256,
+
+    #[selector = 0x423ecb05]
+    CannotBeDelegateCalled -> u256,
+
+    #[selector = 0x3045a6e0]
+    GetGasCostOfCanBeDelegateCalled -> u256,
+
+    #[selector = 0x3c7c8dd0]
+    GetGasCostOfCannotBeDelegateCalled -> u256,
+
+    #[selector = 0x64270164]
+    CallsIntoNoDelegateCallFunction,
+}
+
+pub contract NoDelegateCallTest uses (ctx: Ctx, evm: mut Evm) {
+    init() uses (ctx, mut evm) { evm.sstore(slot: ORIGINAL_SLOT, value: ctx.address().inner) }
+
+    recv NoDelegateCallTestMsg {
+        CanBeDelegateCalled -> u256 uses (ctx) {
+            can_be_delegate_called()
+        }
+
+        CannotBeDelegateCalled -> u256 uses (ctx, evm) {
+            cannot_be_delegate_called()
+        }
+
+        GetGasCostOfCanBeDelegateCalled -> u256 uses (ctx, evm) {
+            let gas_before = evm.gas()
+            can_be_delegate_called()
+            gas_before - evm.gas()
+        }
+
+        GetGasCostOfCannotBeDelegateCalled -> u256
+        uses (ctx, evm)
+        {
+            let gas_before = evm.gas()
+            cannot_be_delegate_called()
+            gas_before - evm.gas()
+        }
+
+        CallsIntoNoDelegateCallFunction uses (ctx, evm) {
+            no_delegate_call_private()
+        }
+    }
+}

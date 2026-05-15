@@ -2,6 +2,7 @@ import { Wallet } from 'ethers'
 import { ethers, waffle } from 'hardhat'
 import { NoDelegateCallTest } from '../typechain/NoDelegateCallTest'
 import { expect } from './shared/expect'
+import { getContractFactory } from './shared/feArtifacts'
 import snapshotGasCost from './shared/snapshotGasCost'
 
 describe('NoDelegateCall', () => {
@@ -14,7 +15,7 @@ describe('NoDelegateCall', () => {
   })
 
   const noDelegateCallFixture = async () => {
-    const noDelegateCallTestFactory = await ethers.getContractFactory('NoDelegateCallTest')
+    const noDelegateCallTestFactory = await getContractFactory('NoDelegateCallTest')
     const noDelegateCallTest = (await noDelegateCallTestFactory.deploy()) as NoDelegateCallTest
     const minimalProxyFactory = new ethers.ContractFactory(
       noDelegateCallTestFactory.interface,

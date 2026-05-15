@@ -1,6 +1,7 @@
 pub use bit_math::{self}
 pub use full_math::{self}
 pub use liquidity_math::{self}
+pub use no_delegate_call::{self}
 pub use oracle::{self}
 pub use sqrt_price_math::{self}
 pub use swap_math::{self}
