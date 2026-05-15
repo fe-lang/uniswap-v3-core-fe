@@ -1,12 +1,26 @@
-use std::abi::sol::{self, Uint160}
-use std::evm::{assert_msg, Address, Call, Ctx, Evm, Log, RawMem}
+use std::abi::sol::{self, Bytes32, Int24, Uint160}
+use std::evm::{assert_msg, Address, Call, Ctx, Evm, Log, RawMem, StorageMap}
+use super::libraries::liquidity_math::add_delta
+use super::libraries::position
+use super::libraries::safe_cast::to_int128
+use super::libraries::sqrt_price_math::{get_amount0_delta, get_amount1_delta}
+use super::libraries::tick
 use super::libraries::tick::tick_spacing_to_max_liquidity_per_tick
-use super::libraries::tick_bitmap::int_key
-use super::libraries::tick_math::{get_tick_at_sqrt_ratio, max_sqrt_ratio, min_sqrt_ratio}
+use super::libraries::tick_bitmap::{flip_tick, int_key}
+use super::libraries::tick_math::{
+    get_sqrt_ratio_at_tick,
+    get_tick_at_sqrt_ratio,
+    max_sqrt_ratio,
+    min_sqrt_ratio,
+    MAX_TICK,
+    MIN_TICK,
+}
 
 const TEST_POOL_START_TIME: u256 = 1601906400
+const POSITIONS_SLOT: u256 = 7
 const INITIALIZE_TOPIC: u256 = 0x98636036cb66a9c19a37435efc1e90142190214e8abeb821bdba3f2990dd4c95
 const INCREASE_OBSERVATION_CARDINALITY_NEXT_TOPIC: u256 = 0xac49e518f90a358f652e4400164f05a5d8f7e35e7747279bc3a93dbf584e125a
+const MINT_TOPIC: u256 = 0x7a53080ba414158be7ec69b987b5fb7d07dee101fe85488f0853ae16239d0bde
 
 msg MockTimePoolDeployerMsg {
     #[selector = sol("parameters()")]
@@ -61,6 +75,31 @@ msg MockTimeUniswapV3PoolMsg {
 
     #[selector = sol("feeGrowthGlobal1X128()")]
     FeeGrowthGlobal1X128 -> u256,
+
+    #[selector = sol("liquidity()")]
+    Liquidity -> u128,
+
+    #[selector = sol("ticks(int24)")]
+    Ticks { tick: Int24 } -> (u128, i128, u256, u256, i64, u256, u32, bool),
+
+    #[selector = sol("positions(bytes32)")]
+    Positions { key: Bytes32 } -> (u128, u256, u256, u128, u128),
+
+    #[selector = sol("mint(address,int24,int24,uint128,bytes)")]
+    Mint { recipient: Address, tickLower: Int24, tickUpper: Int24, amount: u128, data: Bytes } -> (
+        u256,
+        u256,
+    ),
+}
+
+msg Erc20MinimalMsg {
+    #[selector = sol("balanceOf(address)")]
+    BalanceOf { account: Address } -> u256,
+}
+
+msg MintCallbackMsg {
+    #[selector = sol("uniswapV3MintCallback(uint256,uint256,bytes)")]
+    UniswapV3MintCallback { amount0Owed: u256, amount1Owed: u256, data: Bytes },
 }
 
 struct MockTimePoolStore {
@@ -82,12 +121,33 @@ struct MockTimePoolStore {
     observation0_seconds_per_liquidity_cumulative_x128: u256,
     observation0_initialized: bool,
     time: u256,
+    liquidity: u128,
     fee_growth_global0_x128: u256,
     fee_growth_global1_x128: u256,
+    tick_bitmap: StorageMap<u256, u256>,
 }
 
 fn int24_abi_word(_ value: i32) -> u256 {
     int_key(value as i256)
+}
+
+fn check_ticks(tick_lower: i256, tick_upper: i256) {
+    assert_msg(tick_lower < tick_upper, "TLU")
+    assert_msg(tick_lower >= MIN_TICK, "TLM")
+    assert_msg(tick_upper <= MAX_TICK, "TUM")
+}
+
+fn current_tick_cumulative(tick_cumulative: i64, tick_current: i32, time_delta: u32) -> i256 {
+    (tick_cumulative as i256) + ((tick_current as i256) * (time_delta as i256))
+}
+
+fn current_seconds_per_liquidity(
+    seconds_per_liquidity_cumulative_x128: u256,
+    time_delta: u32,
+    liquidity: u128,
+) -> u256 {
+    let denominator = if liquidity > 0 { liquidity as u256 } else { 1 }
+    seconds_per_liquidity_cumulative_x128 + (((time_delta as u256) << 128) / denominator)
 }
 
 fn emit_initialize(sqrt_price_x96: u256, tick: i32) uses (evm: mut Evm) {
@@ -107,6 +167,32 @@ uses (evm: mut Evm)
         offset: ptr,
         len: 64,
         topic0: INCREASE_OBSERVATION_CARDINALITY_NEXT_TOPIC,
+    )
+}
+
+fn emit_mint(
+    sender: Address,
+    owner: Address,
+    tick_lower: i32,
+    tick_upper: i32,
+    amount: u128,
+    amount0: u256,
+    amount1: u256,
+)
+uses (evm: mut Evm)
+{
+    let ptr = std::evm::mem::alloc(0)
+    evm.mstore(addr: ptr, value: sender.inner)
+    evm.mstore(addr: ptr + 32, value: amount as u256)
+    evm.mstore(addr: ptr + 64, value: amount0)
+    evm.mstore(addr: ptr + 96, value: amount1)
+    evm.log4(
+        offset: ptr,
+        len: 128,
+        topic0: MINT_TOPIC,
+        topic1: owner.inner,
+        topic2: int24_abi_word(tick_lower),
+        topic3: int24_abi_word(tick_upper),
     )
 }
 
@@ -241,6 +327,231 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
 
         FeeGrowthGlobal1X128 -> u256 uses (store) {
             store.fee_growth_global1_x128
+        }
+
+        Liquidity -> u128 uses (store) {
+            store.liquidity
+        }
+
+        Ticks { tick } -> (u128, i128, u256, u256, i64, u256, u32, bool)
+        uses (mut evm)
+        {
+            let (
+                liquidity_gross,
+                liquidity_net,
+                fee_growth_outside0_x128,
+                fee_growth_outside1_x128,
+                tick_cumulative_outside,
+                seconds_per_liquidity_outside_x128,
+                seconds_outside,
+                initialized,
+            ) = tick::read_tick(tick.val as i256)
+            (
+                liquidity_gross,
+                liquidity_net,
+                fee_growth_outside0_x128,
+                fee_growth_outside1_x128,
+                tick_cumulative_outside.downcast_unchecked(),
+                seconds_per_liquidity_outside_x128,
+                seconds_outside,
+                initialized,
+            )
+        }
+
+        Positions { key } -> (u128, u256, u256, u128, u128)
+        uses (mut evm)
+        {
+            position::read_position(
+                position::mapping_slot(key: key.val, positions_slot: POSITIONS_SLOT),
+            )
+        }
+
+        Mint { recipient, tickLower, tickUpper, amount, data } -> (u256, u256)
+        uses (ctx, mut call, mut evm, mut store)
+        {
+            assert_msg(store.unlocked, "LOK")
+            store.unlocked = false
+
+            assert(amount > 0)
+            let tick_lower = tickLower.val as i256
+            let tick_upper = tickUpper.val as i256
+            check_ticks(tick_lower, tick_upper: tick_upper)
+
+            let liquidity_delta = to_int128(amount as i256)
+            let current_time: u32 = store.time.downcast_unchecked()
+            let time_delta = current_time - store.observation0_block_timestamp
+            let tick_cumulative = current_tick_cumulative(
+                tick_cumulative: store.observation0_tick_cumulative,
+                tick_current: store.tick,
+                time_delta,
+            )
+            let previous_seconds_per_liquidity = store
+                .observation0_seconds_per_liquidity_cumulative_x128
+            let seconds_per_liquidity_cumulative_x128 = current_seconds_per_liquidity(
+                seconds_per_liquidity_cumulative_x128: previous_seconds_per_liquidity,
+                time_delta,
+                liquidity: store.liquidity,
+            )
+
+            let flipped_lower = tick::update(
+                tick: tick_lower,
+                tick_current: store.tick as i256,
+                liquidity_delta,
+                fee_growth_global0_x128: store.fee_growth_global0_x128,
+                fee_growth_global1_x128: store.fee_growth_global1_x128,
+                seconds_per_liquidity_cumulative_x128,
+                tick_cumulative,
+                time: current_time,
+                upper: false,
+                max_liquidity: store.max_liquidity_per_tick,
+            )
+            let flipped_upper = tick::update(
+                tick: tick_upper,
+                tick_current: store.tick as i256,
+                liquidity_delta,
+                fee_growth_global0_x128: store.fee_growth_global0_x128,
+                fee_growth_global1_x128: store.fee_growth_global1_x128,
+                seconds_per_liquidity_cumulative_x128,
+                tick_cumulative,
+                time: current_time,
+                upper: true,
+                max_liquidity: store.max_liquidity_per_tick,
+            )
+
+            if flipped_lower {
+                with (store.tick_bitmap) {
+                    flip_tick(tick: tick_lower, tick_spacing: store.tick_spacing as i256)
+                }
+            }
+            if flipped_upper {
+                with (store.tick_bitmap) {
+                    flip_tick(tick: tick_upper, tick_spacing: store.tick_spacing as i256)
+                }
+            }
+
+            let (fee_growth_inside0_x128, fee_growth_inside1_x128) = tick::get_fee_growth_inside(
+                tick_lower,
+                tick_upper,
+                tick_current: store.tick as i256,
+                fee_growth_global0_x128: store.fee_growth_global0_x128,
+                fee_growth_global1_x128: store.fee_growth_global1_x128,
+            )
+            let position_slot = position::position_slot(
+                owner: recipient,
+                tick_lower,
+                tick_upper,
+                positions_slot: POSITIONS_SLOT,
+            )
+            position::update(
+                base_slot: position_slot,
+                liquidity_delta,
+                fee_growth_inside0_x128,
+                fee_growth_inside1_x128,
+            )
+
+            let amount0 = if (store.tick as i256) < tick_lower {
+                get_amount0_delta(
+                    sqrt_ratio_a_x96: get_sqrt_ratio_at_tick(tick: tick_lower),
+                    sqrt_ratio_b_x96: get_sqrt_ratio_at_tick(tick: tick_upper),
+                    amount,
+                    round_up: true,
+                )
+            } else if (store.tick as i256) < tick_upper {
+                get_amount0_delta(
+                    sqrt_ratio_a_x96: store.sqrt_price_x96,
+                    sqrt_ratio_b_x96: get_sqrt_ratio_at_tick(tick: tick_upper),
+                    amount,
+                    round_up: true,
+                )
+            } else {
+                0
+            }
+            let amount1 = if (store.tick as i256) < tick_lower {
+                0
+            } else if (store.tick as i256) < tick_upper {
+                get_amount1_delta(
+                    sqrt_ratio_a_x96: get_sqrt_ratio_at_tick(tick: tick_lower),
+                    sqrt_ratio_b_x96: store.sqrt_price_x96,
+                    amount,
+                    round_up: true,
+                )
+            } else {
+                get_amount1_delta(
+                    sqrt_ratio_a_x96: get_sqrt_ratio_at_tick(tick: tick_lower),
+                    sqrt_ratio_b_x96: get_sqrt_ratio_at_tick(tick: tick_upper),
+                    amount,
+                    round_up: true,
+                )
+            }
+
+            if (store.tick as i256) >= tick_lower && (store.tick as i256) < tick_upper {
+                store.observation0_block_timestamp = current_time
+                store.observation0_tick_cumulative = tick_cumulative.downcast_unchecked()
+                store
+                    .observation0_seconds_per_liquidity_cumulative_x128 = seconds_per_liquidity_cumulative_x128
+                store.liquidity = add_delta(store.liquidity, liquidity_delta)
+            }
+
+            let balance0_before = if amount0 > 0 {
+                call.static(
+                    addr: store.token0,
+                    gas: evm.gas(),
+                    message: Erc20MinimalMsg::BalanceOf { account: ctx.address() },
+                )
+            } else {
+                0
+            }
+            let balance1_before = if amount1 > 0 {
+                call.static(
+                    addr: store.token1,
+                    gas: evm.gas(),
+                    message: Erc20MinimalMsg::BalanceOf { account: ctx.address() },
+                )
+            } else {
+                0
+            }
+
+            call.call(
+                addr: ctx.caller(),
+                gas: evm.gas(),
+                value: 0,
+                message: MintCallbackMsg::UniswapV3MintCallback {
+                    amount0Owed: amount0,
+                    amount1Owed: amount1,
+                    data,
+                },
+            )
+
+            if amount0 > 0 {
+                let balance0_after: u256 = call
+                    .static(
+                        addr: store.token0,
+                        gas: evm.gas(),
+                        message: Erc20MinimalMsg::BalanceOf { account: ctx.address() },
+                    )
+                assert_msg(balance0_before + amount0 <= balance0_after, "M0")
+            }
+            if amount1 > 0 {
+                let balance1_after: u256 = call
+                    .static(
+                        addr: store.token1,
+                        gas: evm.gas(),
+                        message: Erc20MinimalMsg::BalanceOf { account: ctx.address() },
+                    )
+                assert_msg(balance1_before + amount1 <= balance1_after, "M1")
+            }
+
+            store.unlocked = true
+            emit_mint(
+                sender: ctx.caller(),
+                owner: recipient,
+                tick_lower: tickLower.val,
+                tick_upper: tickUpper.val,
+                amount,
+                amount0,
+                amount1,
+            )
+            (amount0, amount1)
         }
     }
 }
