@@ -1,0 +1,148 @@
+use std::abi::sol::{self, Uint160}
+use std::evm::{Address, Ctx, Evm, RawMem}
+
+const MASK_U160: u256 = 0xffffffffffffffffffffffffffffffffffffffff
+
+msg PoolMsg {
+    #[selector = sol("token0()")]
+    Token0 -> u256,
+
+    #[selector = sol("token1()")]
+    Token1 -> u256,
+
+    #[selector = sol("slot0()")]
+    Slot0 -> (u256, i32, u16, u16, u16, u8, bool),
+
+    #[selector = sol("swap(address,bool,int256,uint160,bytes)")]
+    Swap {
+        recipient: Address,
+        zeroForOne: bool,
+        amountSpecified: i256,
+        sqrtPriceLimitX96: Uint160,
+        data: Bytes,
+    } -> (i256, i256),
+}
+
+msg TokenMsg {
+    #[selector = sol("transferFrom(address,address,uint256)")]
+    TransferFrom { sender: Address, recipient: Address, amount: u256 } -> bool,
+}
+
+msg UniswapV3PoolSwapTestMsg {
+    #[selector = sol("getSwapResult(address,bool,int256,uint160)")]
+    GetSwapResult {
+        pool: Address,
+        zeroForOne: bool,
+        amountSpecified: i256,
+        sqrtPriceLimitX96: Uint160,
+    } -> (i256, i256, Uint160),
+
+    #[selector = sol("uniswapV3SwapCallback(int256,int256,bytes)")]
+    UniswapV3SwapCallback { amount0Delta: i256, amount1Delta: i256, data: Bytes },
+}
+
+fn as_address(_ value: u256) -> Address {
+    Address { inner: value & MASK_U160 }
+}
+
+fn address_payload(_ sender: Address) -> Bytes uses (evm: mut Evm) {
+    let ptr = std::evm::mem::alloc(64)
+    evm.mstore(addr: ptr, value: 32)
+    evm.mstore(addr: ptr + 32, value: sender.inner)
+    Bytes { data: ptr, len: 32, size: 64 }
+}
+
+fn decode_sender(_ data: Bytes) -> Address uses (evm: Evm) {
+    assert(data.len() >= 32)
+    as_address(evm.mload(data.data + 32))
+}
+
+fn token0(_ pool: Address) -> Address uses (evm: mut Evm) {
+    as_address(
+        evm.call(
+            addr: pool,
+            gas: 1000000,
+            value: 0,
+            message: PoolMsg::Token0 {},
+        ),
+    )
+}
+
+fn token1(_ pool: Address) -> Address uses (evm: mut Evm) {
+    as_address(
+        evm.call(
+            addr: pool,
+            gas: 1000000,
+            value: 0,
+            message: PoolMsg::Token1 {},
+        ),
+    )
+}
+
+fn transfer_from(token: Address, sender: Address, recipient: Address, amount: u256)
+uses (evm: mut Evm)
+{
+    assert(
+        evm.call(
+            addr: token,
+            gas: 1000000,
+            value: 0,
+            message: TokenMsg::TransferFrom { sender, recipient, amount },
+        ),
+    )
+}
+
+pub contract UniswapV3PoolSwapTest uses (ctx: Ctx, evm: mut Evm) {
+    recv UniswapV3PoolSwapTestMsg {
+        GetSwapResult { pool, zeroForOne, amountSpecified, sqrtPriceLimitX96 } -> (
+            i256,
+            i256,
+            Uint160,
+        )
+        uses (ctx, mut evm)
+        {
+            let (amount0_delta, amount1_delta) = evm
+                .call(
+                    addr: pool,
+                    gas: 1000000,
+                    value: 0,
+                    message: PoolMsg::Swap {
+                        recipient: Address::zero(),
+                        zeroForOne,
+                        amountSpecified,
+                        sqrtPriceLimitX96,
+                        data: address_payload(ctx.caller()),
+                    },
+                )
+            let (sqrt_price_x96, _, _, _, _, _, _) = evm
+                .call(
+                    addr: pool,
+                    gas: 1000000,
+                    value: 0,
+                    message: PoolMsg::Slot0 {},
+                )
+            (amount0_delta, amount1_delta, Uint160 { val: sqrt_price_x96 })
+        }
+
+        UniswapV3SwapCallback { amount0Delta, amount1Delta, data }
+        uses (ctx, mut evm)
+        {
+            let sender = decode_sender(data)
+            if amount0Delta > 0 {
+                transfer_from(
+                    token: token0(ctx.caller()),
+                    sender,
+                    recipient: ctx.caller(),
+                    amount: amount0Delta.downcast_unchecked(),
+                )
+            } else if amount1Delta > 0 {
+                transfer_from(
+                    token: token1(ctx.caller()),
+                    sender,
+                    recipient: ctx.caller(),
+                    amount: amount1Delta.downcast_unchecked(),
+                )
+            }
+        }
+    }
+}

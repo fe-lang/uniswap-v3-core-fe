@@ -6,3 +6,4 @@ pub use test_uniswap_v3_callee::{self}
 pub use test_uniswap_v3_swap_pay::{self}
 pub use uniswap_v3_factory::{self}
 pub use uniswap_v3_pool::{self}
+pub use uniswap_v3_pool_swap_test::{self}

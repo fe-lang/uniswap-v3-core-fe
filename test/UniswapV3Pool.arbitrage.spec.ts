@@ -5,6 +5,7 @@ import { MockTimeUniswapV3Pool } from '../typechain/MockTimeUniswapV3Pool'
 import { TickMathTest } from '../typechain/TickMathTest'
 import { UniswapV3PoolSwapTest } from '../typechain/UniswapV3PoolSwapTest'
 import { expect } from './shared/expect'
+import { getContractFactory } from './shared/feArtifacts'
 
 import { poolFixture } from './shared/fixtures'
 import { formatPrice, formatTokenAmount } from './shared/format'
@@ -95,10 +96,10 @@ describe('UniswapV3Pool arbitrage tests', () => {
               pool,
             })
 
-            const testerFactory = await ethers.getContractFactory('UniswapV3PoolSwapTest')
+            const testerFactory = await getContractFactory('UniswapV3PoolSwapTest')
             const tester = (await testerFactory.deploy()) as UniswapV3PoolSwapTest
 
-            const tickMathFactory = await ethers.getContractFactory('TickMathTest')
+            const tickMathFactory = await getContractFactory('TickMathTest')
             const tickMath = (await tickMathFactory.deploy()) as TickMathTest
 
             await fix.token0.approve(tester.address, MaxUint256)
