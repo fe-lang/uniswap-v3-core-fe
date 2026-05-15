@@ -1,0 +1,82 @@
+use std::abi::sol
+
+pub fn add_u256(x: u256, y: u256) -> u256 {
+    let z = x + y
+    assert(z >= x)
+    z
+}
+
+pub fn sub_u256(x: u256, y: u256) -> u256 {
+    let z = x - y
+    assert(z <= x)
+    z
+}
+
+pub fn mul_u256(x: u256, y: u256) -> u256 {
+    let z = x * y
+    assert(x == 0 || z / x == y)
+    z
+}
+
+pub fn add_i256(x: i256, y: i256) -> i256 {
+    let z = x + y
+    assert((z >= x) == (y >= 0))
+    z
+}
+
+pub fn sub_i256(x: i256, y: i256) -> i256 {
+    let z = x - y
+    assert((z <= x) == (y >= 0))
+    z
+}
+
+msg LowGasSafeMathEchidnaTestMsg {
+    #[selector = sol("checkAdd(uint256,uint256)")]
+    CheckAdd { x: u256, y: u256 },
+
+    #[selector = sol("checkSub(uint256,uint256)")]
+    CheckSub { x: u256, y: u256 },
+
+    #[selector = sol("checkMul(uint256,uint256)")]
+    CheckMul { x: u256, y: u256 },
+
+    #[selector = sol("checkAddi(int256,int256)")]
+    CheckAddi { x: i256, y: i256 },
+
+    #[selector = sol("checkSubi(int256,int256)")]
+    CheckSubi { x: i256, y: i256 },
+}
+
+pub contract LowGasSafeMathEchidnaTest {
+    recv LowGasSafeMathEchidnaTestMsg {
+        CheckAdd { x, y } {
+            let z = add_u256(x, y)
+            assert(z == x + y)
+            assert(z >= x && z >= y)
+        }
+
+        CheckSub { x, y } {
+            let z = sub_u256(x, y)
+            assert(z == x - y)
+            assert(z <= x)
+        }
+
+        CheckMul { x, y } {
+            let z = mul_u256(x, y)
+            assert(z == x * y)
+            assert(x == 0 || y == 0 || (z >= x && z >= y))
+        }
+
+        CheckAddi { x, y } {
+            let z = add_i256(x, y)
+            assert(z == x + y)
+            if y < 0 { assert(z < x) } else { assert(z >= x) }
+        }
+
+        CheckSubi { x, y } {
+            let z = sub_i256(x, y)
+            assert(z == x - y)
+            if y < 0 { assert(z > x) } else { assert(z <= x) }
+        }
+    }
+}
