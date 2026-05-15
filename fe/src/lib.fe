@@ -2,5 +2,6 @@ pub use libraries::{self}
 pub use mock_time_uniswap_v3_pool::{self}
 pub use mock_time_uniswap_v3_pool_deployer::{self}
 pub use test_erc20::{self}
+pub use test_uniswap_v3_callee::{self}
 pub use uniswap_v3_factory::{self}
 pub use uniswap_v3_pool::{self}

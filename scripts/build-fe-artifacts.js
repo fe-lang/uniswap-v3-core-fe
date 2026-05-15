@@ -110,6 +110,167 @@ const abiOverrides = {
       stateMutability: 'nonpayable',
     },
   ],
+  TestUniswapV3Callee: [
+    {
+      type: 'constructor',
+      inputs: [],
+      stateMutability: 'nonpayable',
+    },
+    {
+      type: 'event',
+      name: 'SwapCallback',
+      inputs: [
+        { name: 'amount0Delta', type: 'int256', indexed: false },
+        { name: 'amount1Delta', type: 'int256', indexed: false },
+      ],
+    },
+    {
+      type: 'event',
+      name: 'MintCallback',
+      inputs: [
+        { name: 'amount0Owed', type: 'uint256', indexed: false },
+        { name: 'amount1Owed', type: 'uint256', indexed: false },
+      ],
+    },
+    {
+      type: 'event',
+      name: 'FlashCallback',
+      inputs: [
+        { name: 'fee0', type: 'uint256', indexed: false },
+        { name: 'fee1', type: 'uint256', indexed: false },
+      ],
+    },
+    {
+      type: 'function',
+      name: 'swapExact0For1',
+      inputs: [
+        { name: 'pool', type: 'address' },
+        { name: 'amount0In', type: 'uint256' },
+        { name: 'recipient', type: 'address' },
+        { name: 'sqrtPriceLimitX96', type: 'uint160' },
+      ],
+      outputs: [],
+      stateMutability: 'nonpayable',
+    },
+    {
+      type: 'function',
+      name: 'swap0ForExact1',
+      inputs: [
+        { name: 'pool', type: 'address' },
+        { name: 'amount1Out', type: 'uint256' },
+        { name: 'recipient', type: 'address' },
+        { name: 'sqrtPriceLimitX96', type: 'uint160' },
+      ],
+      outputs: [],
+      stateMutability: 'nonpayable',
+    },
+    {
+      type: 'function',
+      name: 'swapExact1For0',
+      inputs: [
+        { name: 'pool', type: 'address' },
+        { name: 'amount1In', type: 'uint256' },
+        { name: 'recipient', type: 'address' },
+        { name: 'sqrtPriceLimitX96', type: 'uint160' },
+      ],
+      outputs: [],
+      stateMutability: 'nonpayable',
+    },
+    {
+      type: 'function',
+      name: 'swap1ForExact0',
+      inputs: [
+        { name: 'pool', type: 'address' },
+        { name: 'amount0Out', type: 'uint256' },
+        { name: 'recipient', type: 'address' },
+        { name: 'sqrtPriceLimitX96', type: 'uint160' },
+      ],
+      outputs: [],
+      stateMutability: 'nonpayable',
+    },
+    {
+      type: 'function',
+      name: 'swapToLowerSqrtPrice',
+      inputs: [
+        { name: 'pool', type: 'address' },
+        { name: 'sqrtPriceX96', type: 'uint160' },
+        { name: 'recipient', type: 'address' },
+      ],
+      outputs: [],
+      stateMutability: 'nonpayable',
+    },
+    {
+      type: 'function',
+      name: 'swapToHigherSqrtPrice',
+      inputs: [
+        { name: 'pool', type: 'address' },
+        { name: 'sqrtPriceX96', type: 'uint160' },
+        { name: 'recipient', type: 'address' },
+      ],
+      outputs: [],
+      stateMutability: 'nonpayable',
+    },
+    {
+      type: 'function',
+      name: 'uniswapV3SwapCallback',
+      inputs: [
+        { name: 'amount0Delta', type: 'int256' },
+        { name: 'amount1Delta', type: 'int256' },
+        { name: 'data', type: 'bytes' },
+      ],
+      outputs: [],
+      stateMutability: 'nonpayable',
+    },
+    {
+      type: 'function',
+      name: 'mint',
+      inputs: [
+        { name: 'pool', type: 'address' },
+        { name: 'recipient', type: 'address' },
+        { name: 'tickLower', type: 'int24' },
+        { name: 'tickUpper', type: 'int24' },
+        { name: 'amount', type: 'uint128' },
+      ],
+      outputs: [],
+      stateMutability: 'nonpayable',
+    },
+    {
+      type: 'function',
+      name: 'uniswapV3MintCallback',
+      inputs: [
+        { name: 'amount0Owed', type: 'uint256' },
+        { name: 'amount1Owed', type: 'uint256' },
+        { name: 'data', type: 'bytes' },
+      ],
+      outputs: [],
+      stateMutability: 'nonpayable',
+    },
+    {
+      type: 'function',
+      name: 'flash',
+      inputs: [
+        { name: 'pool', type: 'address' },
+        { name: 'recipient', type: 'address' },
+        { name: 'amount0', type: 'uint256' },
+        { name: 'amount1', type: 'uint256' },
+        { name: 'pay0', type: 'uint256' },
+        { name: 'pay1', type: 'uint256' },
+      ],
+      outputs: [],
+      stateMutability: 'nonpayable',
+    },
+    {
+      type: 'function',
+      name: 'uniswapV3FlashCallback',
+      inputs: [
+        { name: 'fee0', type: 'uint256' },
+        { name: 'fee1', type: 'uint256' },
+        { name: 'data', type: 'bytes' },
+      ],
+      outputs: [],
+      stateMutability: 'nonpayable',
+    },
+  ],
   UniswapV3Factory: [
     {
       type: 'constructor',

@@ -1,0 +1,414 @@
+use std::abi::sol::{self, Int24, Uint160}
+use std::evm::{Address, Ctx, Evm, Log, RawMem}
+use super::libraries::tick_bitmap::int_key
+
+const MAX_I256: u256 = 0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+const MAX_I256_SIGNED: i256 = 0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+const MASK_U160: u256 = 0xffffffffffffffffffffffffffffffffffffffff
+const SWAP_CALLBACK_TOPIC: u256 = 0xd48241df4a75e663b29e55f9506b31f77ed0f48cfe7e7612d1163144995dc1ca
+const MINT_CALLBACK_TOPIC: u256 = 0xa0968be00566083701c9ef671c169d7fb05ac8907de4ca17185de74ccbb694d4
+const FLASH_CALLBACK_TOPIC: u256 = 0x2b0391b4fa408cfe47abd1977d72985695b2e5ebd3175f55be25f2c68c5df21b
+
+msg PoolMsg {
+    #[selector = sol("token0()")]
+    Token0 -> u256,
+
+    #[selector = sol("token1()")]
+    Token1 -> u256,
+
+    #[selector = sol("swap(address,bool,int256,uint160,bytes)")]
+    Swap {
+        recipient: Address,
+        zeroForOne: bool,
+        amountSpecified: i256,
+        sqrtPriceLimitX96: Uint160,
+        data: Bytes,
+    } -> (i256, i256),
+
+    #[selector = sol("mint(address,int24,int24,uint128,bytes)")]
+    Mint { recipient: Address, tickLower: Int24, tickUpper: Int24, amount: u128, data: Bytes } -> (
+        u256,
+        u256,
+    ),
+
+    #[selector = sol("flash(address,uint256,uint256,bytes)")]
+    Flash { recipient: Address, amount0: u256, amount1: u256, data: Bytes },
+}
+
+msg TokenMsg {
+    #[selector = sol("transferFrom(address,address,uint256)")]
+    TransferFrom { sender: Address, recipient: Address, amount: u256 } -> bool,
+}
+
+msg TestUniswapV3CalleeMsg {
+    #[selector = sol("swapExact0For1(address,uint256,address,uint160)")]
+    SwapExact0For1 {
+        pool: Address,
+        amount0In: u256,
+        recipient: Address,
+        sqrtPriceLimitX96: Uint160,
+    },
+
+    #[selector = sol("swap0ForExact1(address,uint256,address,uint160)")]
+    Swap0ForExact1 {
+        pool: Address,
+        amount1Out: u256,
+        recipient: Address,
+        sqrtPriceLimitX96: Uint160,
+    },
+
+    #[selector = sol("swapExact1For0(address,uint256,address,uint160)")]
+    SwapExact1For0 {
+        pool: Address,
+        amount1In: u256,
+        recipient: Address,
+        sqrtPriceLimitX96: Uint160,
+    },
+
+    #[selector = sol("swap1ForExact0(address,uint256,address,uint160)")]
+    Swap1ForExact0 {
+        pool: Address,
+        amount0Out: u256,
+        recipient: Address,
+        sqrtPriceLimitX96: Uint160,
+    },
+
+    #[selector = sol("swapToLowerSqrtPrice(address,uint160,address)")]
+    SwapToLowerSqrtPrice { pool: Address, sqrtPriceX96: Uint160, recipient: Address },
+
+    #[selector = sol("swapToHigherSqrtPrice(address,uint160,address)")]
+    SwapToHigherSqrtPrice { pool: Address, sqrtPriceX96: Uint160, recipient: Address },
+
+    #[selector = sol("uniswapV3SwapCallback(int256,int256,bytes)")]
+    UniswapV3SwapCallback { amount0Delta: i256, amount1Delta: i256, data: Bytes },
+
+    #[selector = sol("mint(address,address,int24,int24,uint128)")]
+    Mint { pool: Address, recipient: Address, tickLower: Int24, tickUpper: Int24, amount: u128 },
+
+    #[selector = sol("uniswapV3MintCallback(uint256,uint256,bytes)")]
+    UniswapV3MintCallback { amount0Owed: u256, amount1Owed: u256, data: Bytes },
+
+    #[selector = sol("flash(address,address,uint256,uint256,uint256,uint256)")]
+    Flash {
+        pool: Address,
+        recipient: Address,
+        amount0: u256,
+        amount1: u256,
+        pay0: u256,
+        pay1: u256,
+    },
+
+    #[selector = sol("uniswapV3FlashCallback(uint256,uint256,bytes)")]
+    UniswapV3FlashCallback { fee0: u256, fee1: u256, data: Bytes },
+}
+
+fn to_i256(_ value: u256) -> i256 {
+    assert(value <= MAX_I256)
+    value.downcast_unchecked()
+}
+
+fn as_address(_ value: u256) -> Address {
+    Address { inner: value & MASK_U160 }
+}
+
+fn address_payload(_ sender: Address) -> Bytes uses (evm: mut Evm) {
+    let ptr = std::evm::mem::alloc(64)
+    evm.mstore(addr: ptr, value: 32)
+    evm.mstore(addr: ptr + 32, value: sender.inner)
+    Bytes { data: ptr, len: 32, size: 64 }
+}
+
+fn flash_payload(sender: Address, pay0: u256, pay1: u256) -> Bytes
+uses (evm: mut Evm)
+{
+    let ptr = std::evm::mem::alloc(128)
+    evm.mstore(addr: ptr, value: 96)
+    evm.mstore(addr: ptr + 32, value: sender.inner)
+    evm.mstore(addr: ptr + 64, value: pay0)
+    evm.mstore(addr: ptr + 96, value: pay1)
+    Bytes { data: ptr, len: 96, size: 128 }
+}
+
+fn decode_sender(_ data: Bytes) -> Address uses (evm: Evm) {
+    assert(data.len() >= 32)
+    as_address(evm.mload(data.data + 32))
+}
+
+fn token0(_ pool: Address) -> Address uses (evm: mut Evm) {
+    as_address(
+        evm.call(
+            addr: pool,
+            gas: 1000000,
+            value: 0,
+            message: PoolMsg::Token0 {},
+        ),
+    )
+}
+
+fn token1(_ pool: Address) -> Address uses (evm: mut Evm) {
+    as_address(
+        evm.call(
+            addr: pool,
+            gas: 1000000,
+            value: 0,
+            message: PoolMsg::Token1 {},
+        ),
+    )
+}
+
+fn transfer_from(token: Address, sender: Address, recipient: Address, amount: u256)
+uses (evm: mut Evm)
+{
+    assert(
+        evm.call(
+            addr: token,
+            gas: 1000000,
+            value: 0,
+            message: TokenMsg::TransferFrom { sender, recipient, amount },
+        ),
+    )
+}
+
+fn emit_swap_callback(amount0_delta: i256, amount1_delta: i256)
+uses (evm: mut Evm)
+{
+    let ptr = std::evm::mem::alloc(64)
+    evm.mstore(addr: ptr, value: int_key(amount0_delta))
+    evm.mstore(addr: ptr + 32, value: int_key(amount1_delta))
+    evm.log1(offset: ptr, len: 64, topic0: SWAP_CALLBACK_TOPIC)
+}
+
+fn emit_mint_callback(amount0_owed: u256, amount1_owed: u256)
+uses (evm: mut Evm)
+{
+    let ptr = std::evm::mem::alloc(64)
+    evm.mstore(addr: ptr, value: amount0_owed)
+    evm.mstore(addr: ptr + 32, value: amount1_owed)
+    evm.log1(offset: ptr, len: 64, topic0: MINT_CALLBACK_TOPIC)
+}
+
+fn emit_flash_callback(fee0: u256, fee1: u256) uses (evm: mut Evm) {
+    let ptr = std::evm::mem::alloc(64)
+    evm.mstore(addr: ptr, value: fee0)
+    evm.mstore(addr: ptr + 32, value: fee1)
+    evm.log1(offset: ptr, len: 64, topic0: FLASH_CALLBACK_TOPIC)
+}
+
+pub contract TestUniswapV3Callee uses (ctx: Ctx, evm: mut Evm) {
+    recv TestUniswapV3CalleeMsg {
+        SwapExact0For1 { pool, amount0In, recipient, sqrtPriceLimitX96 }
+        uses (ctx, mut evm)
+        {
+            let _ = evm
+                .call(
+                    addr: pool,
+                    gas: 1000000,
+                    value: 0,
+                    message: PoolMsg::Swap {
+                        recipient,
+                        zeroForOne: true,
+                        amountSpecified: to_i256(amount0In),
+                        sqrtPriceLimitX96,
+                        data: address_payload(ctx.caller()),
+                    },
+                )
+        }
+
+        Swap0ForExact1 { pool, amount1Out, recipient, sqrtPriceLimitX96 }
+        uses (ctx, mut evm)
+        {
+            let _ = evm
+                .call(
+                    addr: pool,
+                    gas: 1000000,
+                    value: 0,
+                    message: PoolMsg::Swap {
+                        recipient,
+                        zeroForOne: true,
+                        amountSpecified: 0 - to_i256(amount1Out),
+                        sqrtPriceLimitX96,
+                        data: address_payload(ctx.caller()),
+                    },
+                )
+        }
+
+        SwapExact1For0 { pool, amount1In, recipient, sqrtPriceLimitX96 }
+        uses (ctx, mut evm)
+        {
+            let _ = evm
+                .call(
+                    addr: pool,
+                    gas: 1000000,
+                    value: 0,
+                    message: PoolMsg::Swap {
+                        recipient,
+                        zeroForOne: false,
+                        amountSpecified: to_i256(amount1In),
+                        sqrtPriceLimitX96,
+                        data: address_payload(ctx.caller()),
+                    },
+                )
+        }
+
+        Swap1ForExact0 { pool, amount0Out, recipient, sqrtPriceLimitX96 }
+        uses (ctx, mut evm)
+        {
+            let _ = evm
+                .call(
+                    addr: pool,
+                    gas: 1000000,
+                    value: 0,
+                    message: PoolMsg::Swap {
+                        recipient,
+                        zeroForOne: false,
+                        amountSpecified: 0 - to_i256(amount0Out),
+                        sqrtPriceLimitX96,
+                        data: address_payload(ctx.caller()),
+                    },
+                )
+        }
+
+        SwapToLowerSqrtPrice { pool, sqrtPriceX96, recipient }
+        uses (ctx, mut evm)
+        {
+            let _ = evm
+                .call(
+                    addr: pool,
+                    gas: 1000000,
+                    value: 0,
+                    message: PoolMsg::Swap {
+                        recipient,
+                        zeroForOne: true,
+                        amountSpecified: MAX_I256_SIGNED,
+                        sqrtPriceLimitX96: sqrtPriceX96,
+                        data: address_payload(ctx.caller()),
+                    },
+                )
+        }
+
+        SwapToHigherSqrtPrice { pool, sqrtPriceX96, recipient }
+        uses (ctx, mut evm)
+        {
+            let _ = evm
+                .call(
+                    addr: pool,
+                    gas: 1000000,
+                    value: 0,
+                    message: PoolMsg::Swap {
+                        recipient,
+                        zeroForOne: false,
+                        amountSpecified: MAX_I256_SIGNED,
+                        sqrtPriceLimitX96: sqrtPriceX96,
+                        data: address_payload(ctx.caller()),
+                    },
+                )
+        }
+
+        UniswapV3SwapCallback { amount0Delta, amount1Delta, data }
+        uses (ctx, mut evm)
+        {
+            let sender = decode_sender(data)
+            emit_swap_callback(amount0_delta: amount0Delta, amount1_delta: amount1Delta)
+            if amount0Delta > 0 {
+                transfer_from(
+                    token: token0(ctx.caller()),
+                    sender,
+                    recipient: ctx.caller(),
+                    amount: amount0Delta.downcast_unchecked(),
+                )
+            } else if amount1Delta > 0 {
+                transfer_from(
+                    token: token1(ctx.caller()),
+                    sender,
+                    recipient: ctx.caller(),
+                    amount: amount1Delta.downcast_unchecked(),
+                )
+            } else {
+                assert(amount0Delta == 0 && amount1Delta == 0)
+            }
+        }
+
+        Mint { pool, recipient, tickLower, tickUpper, amount }
+        uses (ctx, mut evm)
+        {
+            let _ = evm
+                .call(
+                    addr: pool,
+                    gas: 1000000,
+                    value: 0,
+                    message: PoolMsg::Mint {
+                        recipient,
+                        tickLower,
+                        tickUpper,
+                        amount,
+                        data: address_payload(ctx.caller()),
+                    },
+                )
+        }
+
+        UniswapV3MintCallback { amount0Owed, amount1Owed, data }
+        uses (ctx, mut evm)
+        {
+            let sender = decode_sender(data)
+            emit_mint_callback(amount0_owed: amount0Owed, amount1_owed: amount1Owed)
+            if amount0Owed > 0 {
+                transfer_from(
+                    token: token0(ctx.caller()),
+                    sender,
+                    recipient: ctx.caller(),
+                    amount: amount0Owed,
+                )
+            }
+            if amount1Owed > 0 {
+                transfer_from(
+                    token: token1(ctx.caller()),
+                    sender,
+                    recipient: ctx.caller(),
+                    amount: amount1Owed,
+                )
+            }
+        }
+
+        Flash { pool, recipient, amount0, amount1, pay0, pay1 }
+        uses (ctx, mut evm)
+        {
+            evm.call(
+                addr: pool,
+                gas: 1000000,
+                value: 0,
+                message: PoolMsg::Flash {
+                    recipient,
+                    amount0,
+                    amount1,
+                    data: flash_payload(sender: ctx.caller(), pay0, pay1),
+                },
+            )
+        }
+
+        UniswapV3FlashCallback { fee0, fee1, data }
+        uses (ctx, mut evm)
+        {
+            assert(data.len() >= 96)
+            let sender = as_address(evm.mload(data.data + 32))
+            let pay0 = evm.mload(data.data + 64)
+            let pay1 = evm.mload(data.data + 96)
+            emit_flash_callback(fee0, fee1)
+            if pay0 > 0 {
+                transfer_from(
+                    token: token0(ctx.caller()),
+                    sender,
+                    recipient: ctx.caller(),
+                    amount: pay0,
+                )
+            }
+            if pay1 > 0 {
+                transfer_from(
+                    token: token1(ctx.caller()),
+                    sender,
+                    recipient: ctx.caller(),
+                    amount: pay1,
+                )
+            }
+        }
+    }
+}
