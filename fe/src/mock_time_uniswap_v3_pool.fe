@@ -1,4 +1,4 @@
-use std::abi::sol::{self, Bytes32, Int24, Uint160}
+use std::abi::sol::{self, Bytes32, Int24, Uint24, Uint160}
 use std::evm::{assert_msg, Address, Call, Ctx, Evm, Log, RawMem, RawOps}
 use super::libraries::liquidity_math::add_delta
 use super::libraries::position
@@ -24,11 +24,7 @@ const INITIALIZE_TOPIC: u256 = 0x98636036cb66a9c19a37435efc1e90142190214e8abeb82
 const INCREASE_OBSERVATION_CARDINALITY_NEXT_TOPIC: u256 = 0xac49e518f90a358f652e4400164f05a5d8f7e35e7747279bc3a93dbf584e125a
 const MINT_TOPIC: u256 = 0x7a53080ba414158be7ec69b987b5fb7d07dee101fe85488f0853ae16239d0bde
 const BURN_TOPIC: u256 = 0x0c396cd989a39f4459b5fa1aed6a9a8dcdbc45908acfd67e028cd568da98982c
-
-msg MockTimePoolDeployerMsg {
-    #[selector = sol("parameters()")]
-    Parameters -> (u256, u256, u256, u32, i32),
-}
+const SET_FEE_PROTOCOL_TOPIC: u256 = 0x973d8d92bb299f4af6ce49b52a8adb85ae46b9f214c4c4fc06ac77401237b133
 
 msg MockTimeUniswapV3PoolMsg {
     #[selector = sol("factory()")]
@@ -81,6 +77,9 @@ msg MockTimeUniswapV3PoolMsg {
 
     #[selector = sol("liquidity()")]
     Liquidity -> u128,
+
+    #[selector = sol("setFeeProtocol(uint8,uint8)")]
+    SetFeeProtocol { feeProtocol0: u8, feeProtocol1: u8 },
 
     #[selector = sol("ticks(int24)")]
     Ticks { tick: Int24 } -> (u128, i128, u256, u256, i64, u256, u32, bool),
@@ -190,6 +189,20 @@ uses (call: mut Call, evm: mut Evm)
             args_offset: ptr,
             args_len: 36,
         ),
+    )
+    evm.returndatacopy(dest: ptr, offset: 0, len: 32)
+    evm.mload(ptr)
+}
+
+fn factory_owner(factory: Address) -> u256 uses (call: mut Call, evm: mut Evm) {
+    let ptr = std::evm::mem::alloc(4)
+    evm.mstore(addr: ptr, value: (0x8da5cb5b as u256) << 224)
+    call.raw_call(
+        addr: factory,
+        gas: evm.gas(),
+        value: 0,
+        args_offset: ptr,
+        args_len: 4,
     )
     evm.returndatacopy(dest: ptr, offset: 0, len: 32)
     evm.mload(ptr)
@@ -323,19 +336,17 @@ uses (evm: mut Evm)
 pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
     mut store: MockTimePoolStore,
 
-    init()
-    uses (ctx, mut call, mut store)
+    init(factory: Address, token0: Address, token1: Address, fee: Uint24, tick_spacing: Int24)
+    uses (mut store)
     {
-        let params: (u256, u256, u256, u32, i32) = ctx
-            .caller()
-            .call(MockTimePoolDeployerMsg::Parameters {})
-        let (factory, token0, token1, fee, tick_spacing) = params
-        store.factory = Address { inner: factory }
-        store.token0 = Address { inner: token0 }
-        store.token1 = Address { inner: token1 }
-        store.fee = fee
-        store.tick_spacing = tick_spacing
-        store.max_liquidity_per_tick = tick_spacing_to_max_liquidity_per_tick(tick_spacing as i256)
+        store.factory = factory
+        store.token0 = token0
+        store.token1 = token1
+        store.fee = fee.val
+        store.tick_spacing = tick_spacing.val
+        store.max_liquidity_per_tick = tick_spacing_to_max_liquidity_per_tick(
+            tick_spacing.val as i256,
+        )
         store.time = TEST_POOL_START_TIME
     }
 
@@ -455,6 +466,28 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
 
         Liquidity -> u128 uses (store) {
             store.liquidity
+        }
+
+        SetFeeProtocol { feeProtocol0, feeProtocol1 }
+        uses (ctx, mut call, mut evm, mut store)
+        {
+            assert(
+                ctx.caller().inner == factory_owner(factory: store.factory),
+            )
+            assert(
+                (((1 as u256) << (feeProtocol0 as u256)) & 0x7f1) != 0
+                    && (((1 as u256) << (feeProtocol1 as u256)) & 0x7f1) != 0,
+            )
+
+            let old = store.fee_protocol
+            store.fee_protocol = ((feeProtocol0 as u256) | ((feeProtocol1 as u256) << 4))
+                .downcast_unchecked()
+            let ptr = std::evm::mem::alloc(0)
+            evm.mstore(addr: ptr, value: (old & 0x0f) as u256)
+            evm.mstore(addr: ptr + 32, value: (old >> 4) as u256)
+            evm.mstore(addr: ptr + 64, value: feeProtocol0 as u256)
+            evm.mstore(addr: ptr + 96, value: feeProtocol1 as u256)
+            evm.log1(offset: ptr, len: 128, topic0: SET_FEE_PROTOCOL_TOPIC)
         }
 
         Ticks { tick } -> (u128, i128, u256, u256, i64, u256, u32, bool)

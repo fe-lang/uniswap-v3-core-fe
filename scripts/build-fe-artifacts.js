@@ -189,19 +189,6 @@ const abiOverrides = {
     },
     {
       type: 'function',
-      name: 'parameters',
-      inputs: [],
-      outputs: [
-        { name: 'factory', type: 'address' },
-        { name: 'token0', type: 'address' },
-        { name: 'token1', type: 'address' },
-        { name: 'fee', type: 'uint24' },
-        { name: 'tickSpacing', type: 'int24' },
-      ],
-      stateMutability: 'view',
-    },
-    {
-      type: 'function',
       name: 'deploy',
       inputs: [
         { name: 'factory', type: 'address' },
@@ -271,6 +258,16 @@ const abiOverrides = {
         { name: 'amount', type: 'uint128', indexed: false },
         { name: 'amount0', type: 'uint256', indexed: false },
         { name: 'amount1', type: 'uint256', indexed: false },
+      ],
+    },
+    {
+      type: 'event',
+      name: 'SetFeeProtocol',
+      inputs: [
+        { name: 'feeProtocol0Old', type: 'uint8', indexed: false },
+        { name: 'feeProtocol1Old', type: 'uint8', indexed: false },
+        { name: 'feeProtocol0New', type: 'uint8', indexed: false },
+        { name: 'feeProtocol1New', type: 'uint8', indexed: false },
       ],
     },
     {
@@ -469,6 +466,16 @@ const abiOverrides = {
         { name: 'amount0', type: 'uint128' },
         { name: 'amount1', type: 'uint128' },
       ],
+      stateMutability: 'nonpayable',
+    },
+    {
+      type: 'function',
+      name: 'setFeeProtocol',
+      inputs: [
+        { name: 'feeProtocol0', type: 'uint8' },
+        { name: 'feeProtocol1', type: 'uint8' },
+      ],
+      outputs: [],
       stateMutability: 'nonpayable',
     },
   ],

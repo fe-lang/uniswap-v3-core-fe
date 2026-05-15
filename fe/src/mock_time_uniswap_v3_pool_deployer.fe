@@ -1,56 +1,13 @@
 use std::abi::sol::{self, Int24, Uint24}
-use std::evm::{Address, Create, Evm, Log, RawMem, RawStorage}
+use std::evm::{Address, Create, Evm, Log, RawMem}
 use super::libraries::tick_bitmap::int_key
 use super::mock_time_uniswap_v3_pool::MockTimeUniswapV3Pool
 
-const PARAMETERS_FACTORY_SLOT: u256 = 0
-const PARAMETERS_TOKEN0_SLOT: u256 = 1
-const PARAMETERS_TOKEN1_SLOT: u256 = 2
-const PARAMETERS_PACKED_SLOT: u256 = 3
 const MASK_U24: u256 = 0xffffff
-const MASK_U160: u256 = 0xffffffffffffffffffffffffffffffffffffffff
 const POOL_DEPLOYED_TOPIC: u256 = 0xf0d1eeab175eee2e20b8dc452773bf2257b25724b323b42bc6e5b4616233ae1f
-
-fn checked_fee(_ fee: Uint24) -> u32 {
-    assert(fee.val <= MASK_U24.downcast_unchecked())
-    fee.val
-}
 
 fn int24_word(_ value: Int24) -> u256 {
     int_key(value.val as i256) & MASK_U24
-}
-
-fn address_at(_ slot: u256) -> u256 uses (evm: Evm) {
-    evm.sload(slot) & MASK_U160
-}
-
-fn store_address(slot: u256, value: Address) uses (evm: mut Evm) {
-    evm.sstore(slot: slot, value: value.inner)
-}
-
-fn set_parameters(
-    factory: Address,
-    token0: Address,
-    token1: Address,
-    fee: Uint24,
-    tick_spacing: Int24,
-)
-uses (evm: mut Evm)
-{
-    store_address(slot: PARAMETERS_FACTORY_SLOT, value: factory)
-    store_address(slot: PARAMETERS_TOKEN0_SLOT, value: token0)
-    store_address(slot: PARAMETERS_TOKEN1_SLOT, value: token1)
-    evm.sstore(
-        slot: PARAMETERS_PACKED_SLOT,
-        value: (checked_fee(fee) as u256) | (int24_word(tick_spacing) << 24),
-    )
-}
-
-fn clear_parameters() uses (evm: mut Evm) {
-    evm.sstore(slot: PARAMETERS_FACTORY_SLOT, value: 0)
-    evm.sstore(slot: PARAMETERS_TOKEN0_SLOT, value: 0)
-    evm.sstore(slot: PARAMETERS_TOKEN1_SLOT, value: 0)
-    evm.sstore(slot: PARAMETERS_PACKED_SLOT, value: 0)
 }
 
 fn packed_pool_salt(token0: Address, token1: Address, fee: Uint24, tick_spacing: Int24) -> u256
@@ -59,7 +16,7 @@ uses (evm: mut Evm)
     let ptr = std::evm::mem::alloc(0)
     let word0 = (token0.inner << 96) | (token1.inner >> 64)
     let word1 = ((token1.inner & 0xffffffffffffffff) << 192)
-        | ((checked_fee(fee) as u256) << 168)
+        | ((fee.val as u256) << 168)
         | (int24_word(tick_spacing) << 144)
     evm.mstore(addr: ptr, value: word0)
     evm.mstore(addr: ptr + 32, value: word1)
@@ -73,9 +30,6 @@ fn emit_pool_deployed(_ pool: Address) uses (evm: mut Evm) {
 }
 
 msg MockTimeUniswapV3PoolDeployerMsg {
-    #[selector = sol("parameters()")]
-    Parameters -> (u256, u256, u256, u32, i32),
-
     #[selector = sol("deploy(address,address,address,uint24,int24)")]
     Deploy {
         factory: Address,
@@ -88,30 +42,16 @@ msg MockTimeUniswapV3PoolDeployerMsg {
 
 pub contract MockTimeUniswapV3PoolDeployer uses (evm: mut Evm) {
     recv MockTimeUniswapV3PoolDeployerMsg {
-        Parameters -> (u256, u256, u256, u32, i32)
-        uses (evm)
-        {
-            (
-                address_at(PARAMETERS_FACTORY_SLOT),
-                address_at(PARAMETERS_TOKEN0_SLOT),
-                address_at(PARAMETERS_TOKEN1_SLOT),
-                (evm.sload(PARAMETERS_PACKED_SLOT) & MASK_U24).downcast_unchecked(),
-                ((evm.sload(PARAMETERS_PACKED_SLOT) >> 24) & MASK_U24).downcast_unchecked(),
-            )
-        }
-
         Deploy { factory, token0, token1, fee, tickSpacing } -> u256
         uses (mut evm)
         {
-            set_parameters(factory, token0, token1, fee, tick_spacing: tickSpacing)
             let pool = evm
                 .create2<MockTimeUniswapV3Pool>(
                     value: 0,
-                    args: (),
+                    args: (factory, token0, token1, fee, tickSpacing),
                     salt: packed_pool_salt(token0, token1, fee, tick_spacing: tickSpacing),
                 )
             emit_pool_deployed(pool)
-            clear_parameters()
             pool.inner
         }
     }
