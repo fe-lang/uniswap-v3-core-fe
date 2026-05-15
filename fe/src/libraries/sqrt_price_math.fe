@@ -1,9 +1,8 @@
 use std::evm::Evm
+use super::fixed_point_96::{Q96, RESOLUTION}
 use super::full_math::{mul_div, mul_div_rounding_up}
 use super::unsafe_math::div_rounding_up
 
-const Q96: u256 = 0x1000000000000000000000000
-const RESOLUTION: u8 = 96
 const MAX_U160: u256 = 0xffffffffffffffffffffffffffffffffffffffff
 const U256_MAX: u256 = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
 

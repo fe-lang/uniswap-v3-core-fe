@@ -1,7 +1,21 @@
+use std::abi::sol::Uint160
+
+const MAX_U160: u256 = 0xffffffffffffffffffffffffffffffffffffffff
 const MAX_I128: i256 = 0x7fffffffffffffffffffffffffffffff
 const MIN_I128: i256 = -0x80000000000000000000000000000000
+const MAX_I256_AS_U256: u256 = 0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+
+pub fn to_uint160(_ y: u256) -> Uint160 {
+    assert(y <= MAX_U160)
+    Uint160 { val: y }
+}
 
 pub fn to_int128(_ y: i256) -> i128 {
     assert(y >= MIN_I128 && y <= MAX_I128)
+    y.downcast_unchecked()
+}
+
+pub fn to_int256(_ y: u256) -> i256 {
+    assert(y <= MAX_I256_AS_U256)
     y.downcast_unchecked()
 }

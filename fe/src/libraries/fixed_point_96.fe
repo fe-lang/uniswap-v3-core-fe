@@ -1,0 +1,2 @@
+pub const RESOLUTION: u8 = 96
+pub const Q96: u256 = 0x1000000000000000000000000
