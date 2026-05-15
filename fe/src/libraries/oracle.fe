@@ -1,0 +1,530 @@
+use std::evm::{assert_msg, mem, Evm, RawMem, RawOps, RawStorage}
+use super::tick_bitmap::int_key
+
+const OBSERVATION_COUNT: u256 = 65535
+const STATE_SLOT: u256 = 65535
+const MAX_U16: u256 = 0xffff
+const MAX_U32: u256 = 0xffffffff
+const MAX_U128: u256 = 0xffffffffffffffffffffffffffffffff
+const MAX_U160: u256 = 0xffffffffffffffffffffffffffffffffffffffff
+
+struct Observation {
+    block_timestamp: u32,
+    tick_cumulative: i256,
+    seconds_per_liquidity_cumulative_x128: u256,
+    initialized: bool,
+}
+
+fn signed_word(_ value: i256, bits: u256) -> u256 {
+    int_key(value) & ((1 << bits) - 1)
+}
+
+fn decode_signed(_ word: u256, bits: u256) -> i256 {
+    let mask = (1 << bits) - 1
+    let value = word & mask
+    let sign_bit = 1 << (bits - 1)
+    if (value & sign_bit) == 0 {
+        return value.downcast_unchecked()
+    }
+
+    let magnitude = ((mask - value) + 1) & mask
+    let magnitude_i: i256 = magnitude.downcast_unchecked()
+    0 - magnitude_i
+}
+
+fn observation_slot(_ index: u256) -> u256 {
+    assert(index < OBSERVATION_COUNT)
+    index
+}
+
+fn read_observation(_ index: u256) -> Observation uses (evm: Evm) {
+    let word = evm.sload(observation_slot(index))
+    Observation {
+        block_timestamp: (word & MAX_U32).downcast_unchecked(),
+        tick_cumulative: decode_signed(word >> 32, bits: 56),
+        seconds_per_liquidity_cumulative_x128: (word >> 88) & MAX_U160,
+        initialized: ((word >> 248) & 0xff) != 0,
+    }
+}
+
+fn write_observation(
+    index: u256,
+    block_timestamp: u32,
+    tick_cumulative: i256,
+    seconds_per_liquidity_cumulative_x128: u256,
+    initialized: bool,
+)
+uses (evm: mut Evm)
+{
+    assert(seconds_per_liquidity_cumulative_x128 <= MAX_U160)
+    let initialized_word = if initialized { 1 } else { 0 }
+    let word = (block_timestamp as u256)
+        | (signed_word(tick_cumulative, bits: 56) << 32)
+        | (seconds_per_liquidity_cumulative_x128 << 88)
+        | (initialized_word << 248)
+    evm.sstore(slot: observation_slot(index), value: word)
+}
+
+fn state_word() -> u256 uses (evm: Evm) {
+    evm.sload(STATE_SLOT)
+}
+
+fn state_time() -> u32 uses (evm: Evm) {
+    (state_word() & MAX_U32).downcast_unchecked()
+}
+
+fn state_tick() -> i256 uses (evm: Evm) {
+    decode_signed(state_word() >> 32, bits: 24)
+}
+
+fn state_liquidity() -> u128 uses (evm: Evm) {
+    ((state_word() >> 56) & MAX_U128).downcast_unchecked()
+}
+
+fn state_index() -> u16 uses (evm: Evm) {
+    ((state_word() >> 184) & MAX_U16).downcast_unchecked()
+}
+
+fn state_cardinality() -> u16 uses (evm: Evm) {
+    ((state_word() >> 200) & MAX_U16).downcast_unchecked()
+}
+
+fn state_cardinality_next() -> u16 uses (evm: Evm) {
+    ((state_word() >> 216) & MAX_U16).downcast_unchecked()
+}
+
+fn write_state(
+    time: u32,
+    tick: i256,
+    liquidity: u128,
+    index: u16,
+    cardinality: u16,
+    cardinality_next: u16,
+)
+uses (evm: mut Evm)
+{
+    let word = (time as u256)
+        | (signed_word(tick, bits: 24) << 32)
+        | ((liquidity as u256) << 56)
+        | ((index as u256) << 184)
+        | ((cardinality as u256) << 200)
+        | ((cardinality_next as u256) << 216)
+    evm.sstore(slot: STATE_SLOT, value: word)
+}
+
+#[arithmetic(unchecked)]
+fn transform(last: Observation, block_timestamp: u32, tick: i256, liquidity: u128) -> Observation {
+    let delta = block_timestamp - last.block_timestamp
+    let denominator = if liquidity > 0 { liquidity as u256 } else { 1 }
+    Observation {
+        block_timestamp,
+        tick_cumulative: last.tick_cumulative + tick * (delta as i256),
+        seconds_per_liquidity_cumulative_x128: (last.seconds_per_liquidity_cumulative_x128
+                + (((delta as u256) << 128) / denominator))
+            & MAX_U160,
+        initialized: true,
+    }
+}
+
+pub fn initialize(time: u32, tick: i256, liquidity: u128) uses (evm: mut Evm) {
+    assert_msg(state_cardinality() == 0, "already initialized")
+    write_observation(
+        index: 0,
+        block_timestamp: time,
+        tick_cumulative: 0,
+        seconds_per_liquidity_cumulative_x128: 0,
+        initialized: true,
+    )
+    write_state(
+        time,
+        tick,
+        liquidity,
+        index: 0,
+        cardinality: 1,
+        cardinality_next: 1,
+    )
+}
+
+#[arithmetic(unchecked)]
+pub fn advance_time(_ by: u32) uses (evm: mut Evm) {
+    write_state(
+        time: state_time() + by,
+        tick: state_tick(),
+        liquidity: state_liquidity(),
+        index: state_index(),
+        cardinality: state_cardinality(),
+        cardinality_next: state_cardinality_next(),
+    )
+}
+
+#[arithmetic(unchecked)]
+fn write(
+    index: u16,
+    block_timestamp: u32,
+    tick: i256,
+    liquidity: u128,
+    cardinality: u16,
+    cardinality_next: u16,
+) -> (u16, u16)
+uses (evm: mut Evm)
+{
+    let last = read_observation(index as u256)
+    if last.block_timestamp == block_timestamp {
+        return (index, cardinality)
+    }
+
+    let cardinality_updated = if cardinality_next > cardinality && index == cardinality - 1 {
+        cardinality_next
+    } else {
+        cardinality
+    }
+    let index_updated: u16 = ((index + 1) % cardinality_updated).downcast_unchecked()
+    let next = transform(last, block_timestamp, tick, liquidity)
+    write_observation(
+        index: index_updated as u256,
+        block_timestamp: next.block_timestamp,
+        tick_cumulative: next.tick_cumulative,
+        seconds_per_liquidity_cumulative_x128: next.seconds_per_liquidity_cumulative_x128,
+        initialized: next.initialized,
+    )
+
+    (index_updated, cardinality_updated)
+}
+
+#[arithmetic(unchecked)]
+pub fn update(_ advance_time_by: u32, tick: i256, liquidity: u128)
+uses (evm: mut Evm)
+{
+    let time = state_time() + advance_time_by
+    let (index, cardinality) = write(
+        index: state_index(),
+        block_timestamp: time,
+        tick: state_tick(),
+        liquidity: state_liquidity(),
+        cardinality: state_cardinality(),
+        cardinality_next: state_cardinality_next(),
+    )
+    write_state(
+        time,
+        tick,
+        liquidity,
+        index,
+        cardinality,
+        cardinality_next: state_cardinality_next(),
+    )
+}
+
+pub fn grow(_ next: u16) -> u16 uses (evm: mut Evm) {
+    let current = state_cardinality_next()
+    assert_msg(current > 0, "I")
+    if next <= current {
+        return current
+    }
+
+    let mut i = current
+    while i < next {
+        write_observation(
+            index: i as u256,
+            block_timestamp: 1,
+            tick_cumulative: 0,
+            seconds_per_liquidity_cumulative_x128: 0,
+            initialized: false,
+        )
+        i += 1
+    }
+
+    write_state(
+        time: state_time(),
+        tick: state_tick(),
+        liquidity: state_liquidity(),
+        index: state_index(),
+        cardinality: state_cardinality(),
+        cardinality_next: next,
+    )
+    next
+}
+
+fn lte(time: u32, a: u32, b: u32) -> bool {
+    if a <= time && b <= time {
+        return a <= b
+    }
+
+    let a_adjusted = if a > time {
+        a as u256
+    } else {
+        (a as u256) + (1 << 32)
+    }
+    let b_adjusted = if b > time {
+        b as u256
+    } else {
+        (b as u256) + (1 << 32)
+    }
+    a_adjusted <= b_adjusted
+}
+
+fn binary_search(time: u32, target: u32, index: u16, cardinality: u16) -> (Observation, Observation)
+uses (evm: Evm)
+{
+    let mut l = ((index + 1) % cardinality) as u256
+    let mut r = l + (cardinality as u256) - 1
+    while true {
+        let i = (l + r) / 2
+        let before_or_at = read_observation(i % (cardinality as u256))
+        if !before_or_at.initialized {
+            l = i + 1
+            continue
+        }
+
+        let at_or_after = read_observation((i + 1) % (cardinality as u256))
+        let target_at_or_after = lte(time, a: before_or_at.block_timestamp, b: target)
+        if target_at_or_after && lte(time, a: target, b: at_or_after.block_timestamp) {
+            return (before_or_at, at_or_after)
+        }
+
+        if !target_at_or_after {
+            r = i - 1
+        } else {
+            l = i + 1
+        }
+    }
+
+    evm.revert(offset: 0, len: 0)
+}
+
+fn surrounding_observations(
+    time: u32,
+    target: u32,
+    tick: i256,
+    index: u16,
+    liquidity: u128,
+    cardinality: u16,
+) -> (Observation, Observation)
+uses (evm: Evm)
+{
+    let before_or_at = read_observation(index as u256)
+    if lte(time, a: before_or_at.block_timestamp, b: target) {
+        if before_or_at.block_timestamp == target {
+            return (
+                before_or_at,
+                Observation {
+                    block_timestamp: 0,
+                    tick_cumulative: 0,
+                    seconds_per_liquidity_cumulative_x128: 0,
+                    initialized: false,
+                },
+            )
+        }
+
+        return (
+            before_or_at,
+            transform(
+                last: before_or_at,
+                block_timestamp: target,
+                tick,
+                liquidity,
+            ),
+        )
+    }
+
+    let mut oldest = read_observation(((index + 1) % cardinality) as u256)
+    if !oldest.initialized {
+        oldest = read_observation(0)
+    }
+    assert_msg(lte(time, a: oldest.block_timestamp, b: target), "OLD")
+
+    binary_search(time, target, index, cardinality)
+}
+
+#[arithmetic(unchecked)]
+fn observe_single(seconds_ago: u32) -> (i256, u256) uses (evm: Evm) {
+    let time = state_time()
+    let tick = state_tick()
+    let index = state_index()
+    let liquidity = state_liquidity()
+    let cardinality = state_cardinality()
+    if seconds_ago == 0 {
+        let mut last = read_observation(index as u256)
+        if last.block_timestamp != time {
+            last = transform(last, block_timestamp: time, tick, liquidity)
+        }
+        return (last.tick_cumulative, last.seconds_per_liquidity_cumulative_x128)
+    }
+
+    let target = time - seconds_ago
+    let (before_or_at, at_or_after) = surrounding_observations(
+        time,
+        target,
+        tick,
+        index,
+        liquidity,
+        cardinality,
+    )
+    if target == before_or_at.block_timestamp {
+        return (before_or_at.tick_cumulative, before_or_at.seconds_per_liquidity_cumulative_x128)
+    }
+    if target == at_or_after.block_timestamp {
+        return (at_or_after.tick_cumulative, at_or_after.seconds_per_liquidity_cumulative_x128)
+    }
+
+    let observation_time_delta = at_or_after.block_timestamp - before_or_at.block_timestamp
+    let target_delta = target - before_or_at.block_timestamp
+    let tick_cumulative = before_or_at.tick_cumulative
+        + ((at_or_after.tick_cumulative - before_or_at.tick_cumulative)
+                / (observation_time_delta as i256))
+            * (target_delta as i256)
+    let after_seconds_per_liquidity = at_or_after.seconds_per_liquidity_cumulative_x128
+    let before_seconds_per_liquidity = before_or_at.seconds_per_liquidity_cumulative_x128
+    let seconds_per_liquidity_delta = (after_seconds_per_liquidity - before_seconds_per_liquidity)
+        & MAX_U160
+    let seconds_per_liquidity_cumulative_x128 = before_or_at.seconds_per_liquidity_cumulative_x128
+        + ((seconds_per_liquidity_delta * (target_delta as u256))
+            / (observation_time_delta as u256))
+    (tick_cumulative, seconds_per_liquidity_cumulative_x128)
+}
+
+fn encode_int56(_ value: i256) -> u256 {
+    int_key(value)
+}
+
+fn handle_observe(return_gas: bool) -> ! uses (evm: mut Evm) {
+    assert_msg(state_cardinality() > 0, "I")
+    let gas_before = evm.gas()
+    let args_offset = evm.calldataload(4)
+    let len = evm.calldataload(4 + args_offset)
+    let out = mem::alloc(64 + 32 + len * 32 + 32 + len * 32)
+    let first_offset: u256 = 64
+    let second_offset = 64 + 32 + len * 32
+    evm.mstore(addr: out, value: first_offset)
+    evm.mstore(addr: out + 32, value: second_offset)
+    evm.mstore(addr: out + first_offset, value: len)
+    evm.mstore(addr: out + second_offset, value: len)
+
+    let mut i: u256 = 0
+    while i < len {
+        let seconds_ago: u32 = evm.calldataload(4 + args_offset + 32 + i * 32).downcast_unchecked()
+        let (tick_cumulative, seconds_per_liquidity_cumulative_x128) = observe_single(seconds_ago)
+        evm.mstore(
+            addr: out + first_offset + 32 + i * 32,
+            value: encode_int56(tick_cumulative),
+        )
+        evm.mstore(
+            addr: out + second_offset + 32 + i * 32,
+            value: seconds_per_liquidity_cumulative_x128,
+        )
+        i += 1
+    }
+
+    if return_gas {
+        evm.mstore(addr: out, value: gas_before - evm.gas())
+        evm.return_data(offset: out, len: 32)
+    }
+
+    evm.return_data(offset: out, len: 64 + 32 + len * 32 + 32 + len * 32)
+}
+
+msg OracleTestMsg {
+    #[selector = 0x252c09d7]
+    Observations { index: u256 } -> (u32, i256, u256, bool),
+
+    #[selector = 0x16ada547]
+    Time -> u32,
+
+    #[selector = 0x3eaf5d9f]
+    Tick -> i256,
+
+    #[selector = 0x1a686502]
+    Liquidity -> u128,
+
+    #[selector = 0x2986c0e5]
+    Index -> u16,
+
+    #[selector = 0xdbffe9ad]
+    Cardinality -> u16,
+
+    #[selector = 0xdd158c18]
+    CardinalityNext -> u16,
+
+    #[selector = 0xdaf50f6b]
+    Initialize { time: u32, tick: i256, liquidity: u128 },
+
+    #[selector = 0xf7fd2cfa]
+    AdvanceTime { by: u32 },
+
+    #[selector = 0x65829dc5]
+    Update { advanceTimeBy: u32, tick: i256, liquidity: u128 },
+
+    #[selector = 0x761eb23e]
+    Grow { cardinalityNext: u16 },
+}
+
+pub contract OracleTest uses (evm: mut Evm) {
+    recv {
+        OracleTestMsg::Observations { index } -> (u32, i256, u256, bool)
+        uses (evm)
+        {
+            let observation = read_observation(index)
+            (
+                observation.block_timestamp,
+                observation.tick_cumulative,
+                observation.seconds_per_liquidity_cumulative_x128,
+                observation.initialized,
+            )
+        }
+
+        OracleTestMsg::Time {} -> u32 uses (evm) {
+            state_time()
+        }
+
+        OracleTestMsg::Tick {} -> i256 uses (evm) {
+            state_tick()
+        }
+
+        OracleTestMsg::Liquidity {} -> u128 uses (evm) {
+            state_liquidity()
+        }
+
+        OracleTestMsg::Index {} -> u16 uses (evm) {
+            state_index()
+        }
+
+        OracleTestMsg::Cardinality {} -> u16 uses (evm) {
+            state_cardinality()
+        }
+
+        OracleTestMsg::CardinalityNext {} -> u16 uses (evm) {
+            state_cardinality_next()
+        }
+
+        OracleTestMsg::Initialize { time, tick, liquidity }
+        uses (mut evm)
+        {
+            initialize(time, tick, liquidity)
+        }
+
+        OracleTestMsg::AdvanceTime { by } uses (mut evm) {
+            advance_time(by)
+        }
+
+        OracleTestMsg::Update { advanceTimeBy, tick, liquidity }
+        uses (mut evm)
+        {
+            update(advanceTimeBy, tick, liquidity)
+        }
+
+        OracleTestMsg::Grow { cardinalityNext } uses (mut evm) {
+            grow(cardinalityNext)
+        }
+
+        _ uses (mut evm) {
+            let selector = evm.calldataload(0) >> 224
+            if selector == 0x883bdbfd {
+                handle_observe(return_gas: false)
+            }
+            if selector == 0x74e69cef {
+                handle_observe(return_gas: true)
+            }
+
+            evm.revert(offset: 0, len: 0)
+        }
+    }
+}

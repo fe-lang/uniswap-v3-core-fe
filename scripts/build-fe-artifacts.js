@@ -20,7 +20,114 @@ const tickInfoComponents = [
   { name: 'initialized', type: 'bool' },
 ]
 
+const oracleInitializeParamsComponents = [
+  { name: 'time', type: 'uint32' },
+  { name: 'tick', type: 'int24' },
+  { name: 'liquidity', type: 'uint128' },
+]
+
 const abiOverrides = {
+  OracleTest: [
+    {
+      type: 'function',
+      name: 'observations',
+      inputs: [{ name: '', type: 'uint256' }],
+      outputs: [
+        { name: 'blockTimestamp', type: 'uint32' },
+        { name: 'tickCumulative', type: 'int56' },
+        { name: 'secondsPerLiquidityCumulativeX128', type: 'uint160' },
+        { name: 'initialized', type: 'bool' },
+      ],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
+      name: 'time',
+      inputs: [],
+      outputs: [{ name: '', type: 'uint32' }],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
+      name: 'tick',
+      inputs: [],
+      outputs: [{ name: '', type: 'int24' }],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
+      name: 'liquidity',
+      inputs: [],
+      outputs: [{ name: '', type: 'uint128' }],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
+      name: 'index',
+      inputs: [],
+      outputs: [{ name: '', type: 'uint16' }],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
+      name: 'cardinality',
+      inputs: [],
+      outputs: [{ name: '', type: 'uint16' }],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
+      name: 'cardinalityNext',
+      inputs: [],
+      outputs: [{ name: '', type: 'uint16' }],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
+      name: 'initialize',
+      inputs: [{ name: 'params', type: 'tuple', components: oracleInitializeParamsComponents }],
+      outputs: [],
+      stateMutability: 'nonpayable',
+    },
+    {
+      type: 'function',
+      name: 'advanceTime',
+      inputs: [{ name: 'by', type: 'uint32' }],
+      outputs: [],
+      stateMutability: 'nonpayable',
+    },
+    {
+      type: 'function',
+      name: 'update',
+      inputs: [{ name: 'params', type: 'tuple', components: oracleInitializeParamsComponents.map((component, i) => i === 0 ? { name: 'advanceTimeBy', type: 'uint32' } : component) }],
+      outputs: [],
+      stateMutability: 'nonpayable',
+    },
+    {
+      type: 'function',
+      name: 'grow',
+      inputs: [{ name: '_cardinalityNext', type: 'uint16' }],
+      outputs: [],
+      stateMutability: 'nonpayable',
+    },
+    {
+      type: 'function',
+      name: 'observe',
+      inputs: [{ name: 'secondsAgos', type: 'uint32[]' }],
+      outputs: [
+        { name: 'tickCumulatives', type: 'int56[]' },
+        { name: 'secondsPerLiquidityCumulativeX128s', type: 'uint160[]' },
+      ],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
+      name: 'getGasCostOfObserve',
+      inputs: [{ name: 'secondsAgos', type: 'uint32[]' }],
+      outputs: [{ name: '', type: 'uint256' }],
+      stateMutability: 'view',
+    },
+  ],
   TickTest: [
     {
       type: 'function',

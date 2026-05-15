@@ -3,6 +3,7 @@ import { ethers, waffle } from 'hardhat'
 import { OracleTest } from '../typechain/OracleTest'
 import checkObservationEquals from './shared/checkObservationEquals'
 import { expect } from './shared/expect'
+import { getContractFactory } from './shared/feArtifacts'
 import { TEST_POOL_START_TIME } from './shared/fixtures'
 import snapshotGasCost from './shared/snapshotGasCost'
 import { MaxUint128 } from './shared/utilities'
@@ -17,7 +18,7 @@ describe('Oracle', () => {
   })
 
   const oracleFixture = async () => {
-    const oracleTestFactory = await ethers.getContractFactory('OracleTest')
+    const oracleTestFactory = await getContractFactory('OracleTest')
     return (await oracleTestFactory.deploy()) as OracleTest
   }
 
