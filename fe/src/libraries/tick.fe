@@ -425,12 +425,16 @@ uses (evm: mut Evm)
     )
 }
 
-pub fn clear(tick: i256) uses (evm: mut Evm) {
-    let base = mapping_slot(tick)
+pub fn clear_at(tick: i256, ticks_slot: u256) uses (evm: mut Evm) {
+    let base = mapping_slot_at(tick, ticks_slot: ticks_slot)
     evm.sstore(slot: base, value: 0)
     evm.sstore(slot: base + 1, value: 0)
     evm.sstore(slot: base + 2, value: 0)
     evm.sstore(slot: base + 3, value: 0)
+}
+
+pub fn clear(tick: i256) uses (evm: mut Evm) {
+    clear_at(tick, ticks_slot: 0)
 }
 
 #[arithmetic(unchecked)]

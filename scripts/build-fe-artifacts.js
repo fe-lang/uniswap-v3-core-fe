@@ -250,6 +250,30 @@ const abiOverrides = {
       ],
     },
     {
+      type: 'event',
+      name: 'Collect',
+      inputs: [
+        { name: 'owner', type: 'address', indexed: true },
+        { name: 'recipient', type: 'address', indexed: false },
+        { name: 'tickLower', type: 'int24', indexed: true },
+        { name: 'tickUpper', type: 'int24', indexed: true },
+        { name: 'amount0', type: 'uint128', indexed: false },
+        { name: 'amount1', type: 'uint128', indexed: false },
+      ],
+    },
+    {
+      type: 'event',
+      name: 'Burn',
+      inputs: [
+        { name: 'owner', type: 'address', indexed: true },
+        { name: 'tickLower', type: 'int24', indexed: true },
+        { name: 'tickUpper', type: 'int24', indexed: true },
+        { name: 'amount', type: 'uint128', indexed: false },
+        { name: 'amount0', type: 'uint256', indexed: false },
+        { name: 'amount1', type: 'uint256', indexed: false },
+      ],
+    },
+    {
       type: 'function',
       name: 'factory',
       inputs: [],
@@ -414,6 +438,36 @@ const abiOverrides = {
       outputs: [
         { name: 'amount0', type: 'uint256' },
         { name: 'amount1', type: 'uint256' },
+      ],
+      stateMutability: 'nonpayable',
+    },
+    {
+      type: 'function',
+      name: 'burn',
+      inputs: [
+        { name: 'tickLower', type: 'int24' },
+        { name: 'tickUpper', type: 'int24' },
+        { name: 'amount', type: 'uint128' },
+      ],
+      outputs: [
+        { name: 'amount0', type: 'uint256' },
+        { name: 'amount1', type: 'uint256' },
+      ],
+      stateMutability: 'nonpayable',
+    },
+    {
+      type: 'function',
+      name: 'collect',
+      inputs: [
+        { name: 'recipient', type: 'address' },
+        { name: 'tickLower', type: 'int24' },
+        { name: 'tickUpper', type: 'int24' },
+        { name: 'amount0Requested', type: 'uint128' },
+        { name: 'amount1Requested', type: 'uint128' },
+      ],
+      outputs: [
+        { name: 'amount0', type: 'uint128' },
+        { name: 'amount1', type: 'uint128' },
       ],
       stateMutability: 'nonpayable',
     },
