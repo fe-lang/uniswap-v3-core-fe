@@ -1,0 +1,141 @@
+use std::abi::sol::{self, Uint160}
+use std::evm::{Address, Ctx, Evm, RawMem}
+
+const MASK_U160: u256 = 0xffffffffffffffffffffffffffffffffffffffff
+
+msg PoolMsg {
+    #[selector = sol("token0()")]
+    Token0 -> u256,
+
+    #[selector = sol("token1()")]
+    Token1 -> u256,
+
+    #[selector = sol("swap(address,bool,int256,uint160,bytes)")]
+    Swap {
+        recipient: Address,
+        zeroForOne: bool,
+        amountSpecified: i256,
+        sqrtPriceX96: Uint160,
+        data: Bytes,
+    } -> (i256, i256),
+}
+
+msg TokenMsg {
+    #[selector = sol("transferFrom(address,address,uint256)")]
+    TransferFrom { sender: Address, recipient: Address, amount: u256 } -> bool,
+}
+
+msg TestUniswapV3SwapPayMsg {
+    #[selector = sol(
+        "swap(address,address,bool,uint160,int256,uint256,uint256)",
+    )]
+    Swap {
+        pool: Address,
+        recipient: Address,
+        zeroForOne: bool,
+        sqrtPriceX96: Uint160,
+        amountSpecified: i256,
+        pay0: u256,
+        pay1: u256,
+    },
+
+    #[selector = sol("uniswapV3SwapCallback(int256,int256,bytes)")]
+    UniswapV3SwapCallback { amount0Delta: i256, amount1Delta: i256, data: Bytes },
+}
+
+fn as_address(_ value: u256) -> Address {
+    Address { inner: value & MASK_U160 }
+}
+
+fn swap_payload(sender: Address, pay0: u256, pay1: u256) -> Bytes
+uses (evm: mut Evm)
+{
+    let ptr = std::evm::mem::alloc(128)
+    evm.mstore(addr: ptr, value: 96)
+    evm.mstore(addr: ptr + 32, value: sender.inner)
+    evm.mstore(addr: ptr + 64, value: pay0)
+    evm.mstore(addr: ptr + 96, value: pay1)
+    Bytes { data: ptr, len: 96, size: 128 }
+}
+
+fn token0(_ pool: Address) -> Address uses (evm: mut Evm) {
+    as_address(
+        evm.call(
+            addr: pool,
+            gas: 1000000,
+            value: 0,
+            message: PoolMsg::Token0 {},
+        ),
+    )
+}
+
+fn token1(_ pool: Address) -> Address uses (evm: mut Evm) {
+    as_address(
+        evm.call(
+            addr: pool,
+            gas: 1000000,
+            value: 0,
+            message: PoolMsg::Token1 {},
+        ),
+    )
+}
+
+fn transfer_from(token: Address, sender: Address, recipient: Address, amount: u256)
+uses (evm: mut Evm)
+{
+    assert(
+        evm.call(
+            addr: token,
+            gas: 1000000,
+            value: 0,
+            message: TokenMsg::TransferFrom { sender, recipient, amount },
+        ),
+    )
+}
+
+pub contract TestUniswapV3SwapPay uses (ctx: Ctx, evm: mut Evm) {
+    recv TestUniswapV3SwapPayMsg {
+        Swap { pool, recipient, zeroForOne, sqrtPriceX96, amountSpecified, pay0, pay1 }
+        uses (ctx, mut evm)
+        {
+            let _ = evm
+                .call(
+                    addr: pool,
+                    gas: 1000000,
+                    value: 0,
+                    message: PoolMsg::Swap {
+                        recipient,
+                        zeroForOne,
+                        amountSpecified,
+                        sqrtPriceX96,
+                        data: swap_payload(sender: ctx.caller(), pay0, pay1),
+                    },
+                )
+        }
+
+        UniswapV3SwapCallback { amount0Delta, amount1Delta, data }
+        uses (ctx, mut evm)
+        {
+            assert(data.len() >= 96)
+            let sender = as_address(evm.mload(data.data + 32))
+            let pay0 = evm.mload(data.data + 64)
+            let pay1 = evm.mload(data.data + 96)
+
+            if pay0 > 0 {
+                transfer_from(
+                    token: token0(ctx.caller()),
+                    sender,
+                    recipient: ctx.caller(),
+                    amount: pay0,
+                )
+            } else if pay1 > 0 {
+                transfer_from(
+                    token: token1(ctx.caller()),
+                    sender,
+                    recipient: ctx.caller(),
+                    amount: pay1,
+                )
+            }
+        }
+    }
+}

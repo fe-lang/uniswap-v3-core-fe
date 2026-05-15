@@ -6,6 +6,7 @@ import { MockTimeUniswapV3Pool } from '../typechain/MockTimeUniswapV3Pool'
 import { TestUniswapV3SwapPay } from '../typechain/TestUniswapV3SwapPay'
 import checkObservationEquals from './shared/checkObservationEquals'
 import { expect } from './shared/expect'
+import { getContractFactory } from './shared/feArtifacts'
 
 import { poolFixture, TEST_POOL_START_TIME } from './shared/fixtures'
 
@@ -1971,7 +1972,7 @@ describe('UniswapV3Pool', () => {
   describe('swap underpayment tests', () => {
     let underpay: TestUniswapV3SwapPay
     beforeEach('deploy swap test', async () => {
-      const underpayFactory = await ethers.getContractFactory('TestUniswapV3SwapPay')
+      const underpayFactory = await getContractFactory('TestUniswapV3SwapPay')
       underpay = (await underpayFactory.deploy()) as TestUniswapV3SwapPay
       await token0.approve(underpay.address, constants.MaxUint256)
       await token1.approve(underpay.address, constants.MaxUint256)
