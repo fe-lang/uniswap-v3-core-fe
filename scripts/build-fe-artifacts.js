@@ -9,6 +9,107 @@ const hardhatOutDir = path.join(feRoot, 'hardhat-artifacts')
 const feBin = process.env.FE_BIN || '/Users/sean/code/fe/pr-review/target/release/fe'
 const contracts = process.argv.slice(2)
 
+const abiOverrides = {
+  SqrtPriceMathTest: [
+    {
+      type: 'function',
+      name: 'getNextSqrtPriceFromInput',
+      inputs: [
+        { name: 'sqrtP', type: 'uint160' },
+        { name: 'liquidity', type: 'uint128' },
+        { name: 'amountIn', type: 'uint256' },
+        { name: 'zeroForOne', type: 'bool' },
+      ],
+      outputs: [{ name: 'sqrtQ', type: 'uint160' }],
+      stateMutability: 'pure',
+    },
+    {
+      type: 'function',
+      name: 'getGasCostOfGetNextSqrtPriceFromInput',
+      inputs: [
+        { name: 'sqrtP', type: 'uint160' },
+        { name: 'liquidity', type: 'uint128' },
+        { name: 'amountIn', type: 'uint256' },
+        { name: 'zeroForOne', type: 'bool' },
+      ],
+      outputs: [{ name: '', type: 'uint256' }],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
+      name: 'getNextSqrtPriceFromOutput',
+      inputs: [
+        { name: 'sqrtP', type: 'uint160' },
+        { name: 'liquidity', type: 'uint128' },
+        { name: 'amountOut', type: 'uint256' },
+        { name: 'zeroForOne', type: 'bool' },
+      ],
+      outputs: [{ name: 'sqrtQ', type: 'uint160' }],
+      stateMutability: 'pure',
+    },
+    {
+      type: 'function',
+      name: 'getGasCostOfGetNextSqrtPriceFromOutput',
+      inputs: [
+        { name: 'sqrtP', type: 'uint160' },
+        { name: 'liquidity', type: 'uint128' },
+        { name: 'amountOut', type: 'uint256' },
+        { name: 'zeroForOne', type: 'bool' },
+      ],
+      outputs: [{ name: '', type: 'uint256' }],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
+      name: 'getAmount0Delta',
+      inputs: [
+        { name: 'sqrtLower', type: 'uint160' },
+        { name: 'sqrtUpper', type: 'uint160' },
+        { name: 'liquidity', type: 'uint128' },
+        { name: 'roundUp', type: 'bool' },
+      ],
+      outputs: [{ name: 'amount0', type: 'uint256' }],
+      stateMutability: 'pure',
+    },
+    {
+      type: 'function',
+      name: 'getAmount1Delta',
+      inputs: [
+        { name: 'sqrtLower', type: 'uint160' },
+        { name: 'sqrtUpper', type: 'uint160' },
+        { name: 'liquidity', type: 'uint128' },
+        { name: 'roundUp', type: 'bool' },
+      ],
+      outputs: [{ name: 'amount1', type: 'uint256' }],
+      stateMutability: 'pure',
+    },
+    {
+      type: 'function',
+      name: 'getGasCostOfGetAmount0Delta',
+      inputs: [
+        { name: 'sqrtLower', type: 'uint160' },
+        { name: 'sqrtUpper', type: 'uint160' },
+        { name: 'liquidity', type: 'uint128' },
+        { name: 'roundUp', type: 'bool' },
+      ],
+      outputs: [{ name: '', type: 'uint256' }],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
+      name: 'getGasCostOfGetAmount1Delta',
+      inputs: [
+        { name: 'sqrtLower', type: 'uint160' },
+        { name: 'sqrtUpper', type: 'uint160' },
+        { name: 'liquidity', type: 'uint128' },
+        { name: 'roundUp', type: 'bool' },
+      ],
+      outputs: [{ name: '', type: 'uint256' }],
+      stateMutability: 'view',
+    },
+  ],
+}
+
 function prefixedHex(hex) {
   const trimmed = hex.trim()
   return trimmed.startsWith('0x') ? trimmed : `0x${trimmed}`
@@ -42,12 +143,13 @@ function writeHardhatArtifact(contractName) {
   const abiPath = path.join(feOutDir, `${contractName}.abi.json`)
   const bytecodePath = path.join(feOutDir, `${contractName}.bin`)
   const runtimePath = path.join(feOutDir, `${contractName}.runtime.bin`)
+  const abi = abiOverrides[contractName] || JSON.parse(fs.readFileSync(abiPath, 'utf8'))
 
   const artifact = {
     _format: 'hh-sol-artifact-1',
     contractName,
     sourceName: `fe/${contractName}.fe`,
-    abi: JSON.parse(fs.readFileSync(abiPath, 'utf8')),
+    abi,
     bytecode: prefixedHex(fs.readFileSync(bytecodePath, 'utf8')),
     deployedBytecode: prefixedHex(fs.readFileSync(runtimePath, 'utf8')),
     linkReferences: {},

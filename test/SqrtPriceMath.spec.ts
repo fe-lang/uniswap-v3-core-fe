@@ -3,6 +3,7 @@ import { ethers } from 'hardhat'
 import { SqrtPriceMathTest } from '../typechain/SqrtPriceMathTest'
 
 import { expect } from './shared/expect'
+import { getContractFactory } from './shared/feArtifacts'
 import snapshotGasCost from './shared/snapshotGasCost'
 import { encodePriceSqrt, expandTo18Decimals, MaxUint128 } from './shared/utilities'
 
@@ -13,7 +14,7 @@ const {
 describe('SqrtPriceMath', () => {
   let sqrtPriceMath: SqrtPriceMathTest
   before(async () => {
-    const sqrtPriceMathTestFactory = await ethers.getContractFactory('SqrtPriceMathTest')
+    const sqrtPriceMathTestFactory = await getContractFactory('SqrtPriceMathTest')
     sqrtPriceMath = (await sqrtPriceMathTestFactory.deploy()) as SqrtPriceMathTest
   })
 

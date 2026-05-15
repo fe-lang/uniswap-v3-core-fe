@@ -1,7 +1,7 @@
-pub fn div_rounding_up(x: u256, y: u256) -> u256 {
-    if x % y > 0 {
-        return (x / y) + 1
+pub fn div_rounding_up(numerator: u256, denominator: u256) -> u256 {
+    if numerator % denominator > 0 {
+        return (numerator / denominator) + 1
     }
 
-    x / y
+    numerator / denominator
 }
