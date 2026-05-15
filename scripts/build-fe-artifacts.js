@@ -271,6 +271,16 @@ const abiOverrides = {
       ],
     },
     {
+      type: 'event',
+      name: 'CollectProtocol',
+      inputs: [
+        { name: 'sender', type: 'address', indexed: true },
+        { name: 'recipient', type: 'address', indexed: true },
+        { name: 'amount0', type: 'uint128', indexed: false },
+        { name: 'amount1', type: 'uint128', indexed: false },
+      ],
+    },
+    {
       type: 'function',
       name: 'factory',
       inputs: [],
@@ -476,6 +486,20 @@ const abiOverrides = {
         { name: 'feeProtocol1', type: 'uint8' },
       ],
       outputs: [],
+      stateMutability: 'nonpayable',
+    },
+    {
+      type: 'function',
+      name: 'collectProtocol',
+      inputs: [
+        { name: 'recipient', type: 'address' },
+        { name: 'amount0Requested', type: 'uint128' },
+        { name: 'amount1Requested', type: 'uint128' },
+      ],
+      outputs: [
+        { name: 'amount0', type: 'uint128' },
+        { name: 'amount1', type: 'uint128' },
+      ],
       stateMutability: 'nonpayable',
     },
   ],

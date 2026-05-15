@@ -81,6 +81,9 @@ msg MockTimeUniswapV3PoolMsg {
     #[selector = sol("setFeeProtocol(uint8,uint8)")]
     SetFeeProtocol { feeProtocol0: u8, feeProtocol1: u8 },
 
+    #[selector = 0x85b66729]
+    CollectProtocol -> (u128, u128),
+
     #[selector = sol("ticks(int24)")]
     Ticks { tick: Int24 } -> (u128, i128, u256, u256, i64, u256, u32, bool),
 
@@ -162,7 +165,7 @@ fn current_seconds_per_liquidity(
     seconds_per_liquidity_cumulative_x128 + (((time_delta as u256) << 128) / denominator)
 }
 
-fn min_u128(a: u128, b: u128) -> u128 {
+fn min_u128(_ a: u128, _ b: u128) -> u128 {
     if a < b { return a }
     b
 }
@@ -488,6 +491,10 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             evm.mstore(addr: ptr + 64, value: feeProtocol0 as u256)
             evm.mstore(addr: ptr + 96, value: feeProtocol1 as u256)
             evm.log1(offset: ptr, len: 128, topic0: SET_FEE_PROTOCOL_TOPIC)
+        }
+
+        CollectProtocol -> (u128, u128) {
+            (0, 0)
         }
 
         Ticks { tick } -> (u128, i128, u256, u256, i64, u256, u32, bool)
