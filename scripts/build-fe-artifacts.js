@@ -10,6 +10,39 @@ const feBin = process.env.FE_BIN || '/Users/sean/code/fe/pr-review/target/releas
 const contracts = process.argv.slice(2)
 
 const abiOverrides = {
+  SwapMathTest: [
+    {
+      type: 'function',
+      name: 'computeSwapStep',
+      inputs: [
+        { name: 'sqrtP', type: 'uint160' },
+        { name: 'sqrtPTarget', type: 'uint160' },
+        { name: 'liquidity', type: 'uint128' },
+        { name: 'amountRemaining', type: 'int256' },
+        { name: 'feePips', type: 'uint24' },
+      ],
+      outputs: [
+        { name: 'sqrtQ', type: 'uint160' },
+        { name: 'amountIn', type: 'uint256' },
+        { name: 'amountOut', type: 'uint256' },
+        { name: 'feeAmount', type: 'uint256' },
+      ],
+      stateMutability: 'pure',
+    },
+    {
+      type: 'function',
+      name: 'getGasCostOfComputeSwapStep',
+      inputs: [
+        { name: 'sqrtP', type: 'uint160' },
+        { name: 'sqrtPTarget', type: 'uint160' },
+        { name: 'liquidity', type: 'uint128' },
+        { name: 'amountRemaining', type: 'int256' },
+        { name: 'feePips', type: 'uint24' },
+      ],
+      outputs: [{ name: '', type: 'uint256' }],
+      stateMutability: 'view',
+    },
+  ],
   SqrtPriceMathTest: [
     {
       type: 'function',

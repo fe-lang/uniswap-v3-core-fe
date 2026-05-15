@@ -6,13 +6,14 @@ import { expect } from './shared/expect'
 import snapshotGasCost from './shared/snapshotGasCost'
 import { encodePriceSqrt, expandTo18Decimals } from './shared/utilities'
 import { SqrtPriceMathTest } from '../typechain/SqrtPriceMathTest'
+import { getContractFactory } from './shared/feArtifacts'
 
 describe('SwapMath', () => {
   let swapMath: SwapMathTest
   let sqrtPriceMath: SqrtPriceMathTest
   before(async () => {
-    const swapMathTestFactory = await ethers.getContractFactory('SwapMathTest')
-    const sqrtPriceMathTestFactory = await ethers.getContractFactory('SqrtPriceMathTest')
+    const swapMathTestFactory = await getContractFactory('SwapMathTest')
+    const sqrtPriceMathTestFactory = await getContractFactory('SqrtPriceMathTest')
     swapMath = (await swapMathTestFactory.deploy()) as SwapMathTest
     sqrtPriceMath = (await sqrtPriceMathTestFactory.deploy()) as SqrtPriceMathTest
   })

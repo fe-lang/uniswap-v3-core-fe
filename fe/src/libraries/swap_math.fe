@@ -1,0 +1,219 @@
+use std::evm::Evm
+use super::full_math::{mul_div, mul_div_rounding_up}
+use super::sqrt_price_math::{
+    get_amount0_delta,
+    get_amount1_delta,
+    get_next_sqrt_price_from_input,
+    get_next_sqrt_price_from_output,
+}
+
+const FEE_DENOMINATOR: u256 = 1000000
+const MAX_U24: u256 = 0xffffff
+const MAX_U160: u256 = 0xffffffffffffffffffffffffffffffffffffffff
+
+#[arithmetic(unchecked)]
+pub fn compute_swap_step(
+    sqrt_ratio_current_x96: u256,
+    sqrt_ratio_target_x96: u256,
+    _ liquidity: u128,
+    amount_remaining: i256,
+    fee_pips: u256,
+) -> (u256, u256, u256, u256) {
+    assert(sqrt_ratio_current_x96 <= MAX_U160)
+    assert(sqrt_ratio_target_x96 <= MAX_U160)
+    assert(fee_pips <= MAX_U24)
+
+    let zero_for_one = sqrt_ratio_current_x96 >= sqrt_ratio_target_x96
+    let exact_in = amount_remaining >= 0
+    let mut sqrt_ratio_next_x96: u256 = 0
+    let mut amount_in: u256 = 0
+    let mut amount_out: u256 = 0
+    let mut fee_amount: u256 = 0
+    let amount_remaining_abs = if exact_in {
+        amount_remaining.downcast_unchecked()
+    } else {
+        (0 - amount_remaining).downcast_unchecked()
+    }
+
+    if exact_in {
+        let amount_remaining_less_fee = mul_div(
+            amount_remaining_abs,
+            FEE_DENOMINATOR - fee_pips,
+            denominator: FEE_DENOMINATOR,
+        )
+        amount_in = if zero_for_one {
+            get_amount0_delta(
+                sqrt_ratio_a_x96: sqrt_ratio_target_x96,
+                sqrt_ratio_b_x96: sqrt_ratio_current_x96,
+                liquidity,
+                round_up: true,
+            )
+        } else {
+            get_amount1_delta(
+                sqrt_ratio_a_x96: sqrt_ratio_current_x96,
+                sqrt_ratio_b_x96: sqrt_ratio_target_x96,
+                liquidity,
+                round_up: true,
+            )
+        }
+
+        if amount_remaining_less_fee >= amount_in {
+            sqrt_ratio_next_x96 = sqrt_ratio_target_x96
+        } else {
+            sqrt_ratio_next_x96 = get_next_sqrt_price_from_input(
+                sqrt_p_x96: sqrt_ratio_current_x96,
+                liquidity,
+                amount_in: amount_remaining_less_fee,
+                zero_for_one,
+            )
+        }
+    } else {
+        amount_out = if zero_for_one {
+            get_amount1_delta(
+                sqrt_ratio_a_x96: sqrt_ratio_target_x96,
+                sqrt_ratio_b_x96: sqrt_ratio_current_x96,
+                liquidity,
+                round_up: false,
+            )
+        } else {
+            get_amount0_delta(
+                sqrt_ratio_a_x96: sqrt_ratio_current_x96,
+                sqrt_ratio_b_x96: sqrt_ratio_target_x96,
+                liquidity,
+                round_up: false,
+            )
+        }
+
+        if amount_remaining_abs >= amount_out {
+            sqrt_ratio_next_x96 = sqrt_ratio_target_x96
+        } else {
+            sqrt_ratio_next_x96 = get_next_sqrt_price_from_output(
+                sqrt_p_x96: sqrt_ratio_current_x96,
+                liquidity,
+                amount_out: amount_remaining_abs,
+                zero_for_one,
+            )
+        }
+    }
+
+    let max = sqrt_ratio_target_x96 == sqrt_ratio_next_x96
+
+    if zero_for_one {
+        amount_in = if max && exact_in {
+            amount_in
+        } else {
+            get_amount0_delta(
+                sqrt_ratio_a_x96: sqrt_ratio_next_x96,
+                sqrt_ratio_b_x96: sqrt_ratio_current_x96,
+                liquidity,
+                round_up: true,
+            )
+        }
+        amount_out = if max && !exact_in {
+            amount_out
+        } else {
+            get_amount1_delta(
+                sqrt_ratio_a_x96: sqrt_ratio_next_x96,
+                sqrt_ratio_b_x96: sqrt_ratio_current_x96,
+                liquidity,
+                round_up: false,
+            )
+        }
+    } else {
+        amount_in = if max && exact_in {
+            amount_in
+        } else {
+            get_amount1_delta(
+                sqrt_ratio_a_x96: sqrt_ratio_current_x96,
+                sqrt_ratio_b_x96: sqrt_ratio_next_x96,
+                liquidity,
+                round_up: true,
+            )
+        }
+        amount_out = if max && !exact_in {
+            amount_out
+        } else {
+            get_amount0_delta(
+                sqrt_ratio_a_x96: sqrt_ratio_current_x96,
+                sqrt_ratio_b_x96: sqrt_ratio_next_x96,
+                liquidity,
+                round_up: false,
+            )
+        }
+    }
+
+    if !exact_in && amount_out > amount_remaining_abs {
+        amount_out = amount_remaining_abs
+    }
+
+    if exact_in && sqrt_ratio_next_x96 != sqrt_ratio_target_x96 {
+        fee_amount = amount_remaining_abs - amount_in
+    } else {
+        fee_amount = mul_div_rounding_up(
+            amount_in,
+            fee_pips,
+            denominator: FEE_DENOMINATOR - fee_pips,
+        )
+    }
+
+    (sqrt_ratio_next_x96, amount_in, amount_out, fee_amount)
+}
+
+msg SwapMathTestMsg {
+    #[selector = 0x100d3f74]
+    ComputeSwapStep {
+        sqrtP: u256,
+        sqrtPTarget: u256,
+        liquidity: u128,
+        amountRemaining: i256,
+        feePips: u256,
+    } -> (u256, u256, u256, u256),
+
+    #[selector = 0xd28c51b7]
+    GetGasCostOfComputeSwapStep {
+        sqrtP: u256,
+        sqrtPTarget: u256,
+        liquidity: u128,
+        amountRemaining: i256,
+        feePips: u256,
+    } -> u256,
+}
+
+pub contract SwapMathTest uses (evm: Evm) {
+    recv SwapMathTestMsg {
+        ComputeSwapStep { sqrtP, sqrtPTarget, liquidity, amountRemaining, feePips } -> (
+            u256,
+            u256,
+            u256,
+            u256,
+        ) {
+            compute_swap_step(
+                sqrt_ratio_current_x96: sqrtP,
+                sqrt_ratio_target_x96: sqrtPTarget,
+                liquidity,
+                amount_remaining: amountRemaining,
+                fee_pips: feePips,
+            )
+        }
+
+        GetGasCostOfComputeSwapStep {
+            sqrtP,
+            sqrtPTarget,
+            liquidity,
+            amountRemaining,
+            feePips,
+        } -> u256
+        uses (evm)
+        {
+            let gas_before = evm.gas()
+            compute_swap_step(
+                sqrt_ratio_current_x96: sqrtP,
+                sqrt_ratio_target_x96: sqrtPTarget,
+                liquidity,
+                amount_remaining: amountRemaining,
+                fee_pips: feePips,
+            )
+            gas_before - evm.gas()
+        }
+    }
+}
