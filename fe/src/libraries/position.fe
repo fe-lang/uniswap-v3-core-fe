@@ -1,0 +1,180 @@
+use std::evm::{assert_msg, mem, Address, Evm, RawMem, RawStorage}
+use super::fixed_point_128::Q128
+use super::full_math::mul_div
+use super::liquidity_math::add_delta
+use super::tick_bitmap::int_key
+
+const MASK_U24: u256 = 0xffffff
+const MASK_U128: u256 = 0xffffffffffffffffffffffffffffffff
+const MIN_I24: i256 = -0x800000
+const MAX_I24: i256 = 0x7fffff
+
+fn checked_int24_word(_ value: i256) -> u256 {
+    assert(value >= MIN_I24 && value <= MAX_I24)
+    int_key(value) & MASK_U24
+}
+
+pub fn position_key(owner: Address, tick_lower: i256, tick_upper: i256) -> u256
+uses (evm: mut Evm)
+{
+    let ptr = mem::alloc(0)
+    let word = (owner.inner << 96)
+        | (checked_int24_word(tick_lower) << 72)
+        | (checked_int24_word(tick_upper) << 48)
+    evm.mstore(addr: ptr, value: word)
+    evm.keccak256(offset: ptr, len: 26)
+}
+
+pub fn mapping_slot(key: u256, positions_slot: u256) -> u256 uses (evm: mut Evm) {
+    let ptr = mem::alloc(0)
+    evm.mstore(addr: ptr, value: key)
+    evm.mstore(addr: ptr + 32, value: positions_slot)
+    evm.keccak256(offset: ptr, len: 64)
+}
+
+pub fn position_slot(
+    owner: Address,
+    tick_lower: i256,
+    tick_upper: i256,
+    positions_slot: u256,
+) -> u256
+uses (evm: mut Evm)
+{
+    mapping_slot(
+        key: position_key(owner, tick_lower: tick_lower, tick_upper: tick_upper),
+        positions_slot: positions_slot,
+    )
+}
+
+fn slot0(_ base_slot: u256) -> u256 uses (evm: mut Evm) {
+    evm.sload(base_slot)
+}
+
+fn slot1(_ base_slot: u256) -> u256 uses (evm: mut Evm) {
+    evm.sload(base_slot + 1)
+}
+
+fn slot2(_ base_slot: u256) -> u256 uses (evm: mut Evm) {
+    evm.sload(base_slot + 2)
+}
+
+fn slot3(_ base_slot: u256) -> u256 uses (evm: mut Evm) {
+    evm.sload(base_slot + 3)
+}
+
+pub fn liquidity(_ base_slot: u256) -> u128 uses (evm: mut Evm) {
+    (slot0(base_slot) & MASK_U128).downcast_unchecked()
+}
+
+pub fn fee_growth_inside0_last_x128(_ base_slot: u256) -> u256 uses (evm: mut Evm) {
+    slot1(base_slot)
+}
+
+pub fn fee_growth_inside1_last_x128(_ base_slot: u256) -> u256 uses (evm: mut Evm) {
+    slot2(base_slot)
+}
+
+pub fn tokens_owed0(_ base_slot: u256) -> u128 uses (evm: mut Evm) {
+    (slot3(base_slot) & MASK_U128).downcast_unchecked()
+}
+
+pub fn tokens_owed1(_ base_slot: u256) -> u128 uses (evm: mut Evm) {
+    ((slot3(base_slot) >> 128) & MASK_U128).downcast_unchecked()
+}
+
+fn store_liquidity(base_slot: u256, value: u128) uses (evm: mut Evm) {
+    evm.sstore(slot: base_slot, value: value as u256)
+}
+
+fn store_tokens_owed(base_slot: u256, token0: u128, token1: u128)
+uses (evm: mut Evm)
+{
+    evm.sstore(
+        slot: base_slot + 3,
+        value: (token0 as u256) | ((token1 as u256) << 128),
+    )
+}
+
+pub fn read_position(_ base_slot: u256) -> (u128, u256, u256, u128, u128)
+uses (evm: mut Evm)
+{
+    (
+        liquidity(base_slot),
+        fee_growth_inside0_last_x128(base_slot),
+        fee_growth_inside1_last_x128(base_slot),
+        tokens_owed0(base_slot),
+        tokens_owed1(base_slot),
+    )
+}
+
+pub fn set_position(
+    base_slot: u256,
+    liquidity_value: u128,
+    fee_growth_inside0_last_x128: u256,
+    fee_growth_inside1_last_x128: u256,
+    tokens_owed0_value: u128,
+    tokens_owed1_value: u128,
+)
+uses (evm: mut Evm)
+{
+    store_liquidity(base_slot, value: liquidity_value)
+    evm.sstore(slot: base_slot + 1, value: fee_growth_inside0_last_x128)
+    evm.sstore(slot: base_slot + 2, value: fee_growth_inside1_last_x128)
+    store_tokens_owed(
+        base_slot,
+        token0: tokens_owed0_value,
+        token1: tokens_owed1_value,
+    )
+}
+
+#[arithmetic(unchecked)]
+pub fn update(
+    base_slot: u256,
+    liquidity_delta: i128,
+    fee_growth_inside0_x128: u256,
+    fee_growth_inside1_x128: u256,
+)
+uses (evm: mut Evm)
+{
+    let (
+        liquidity_before,
+        fee_growth_inside0_last_x128,
+        fee_growth_inside1_last_x128,
+        tokens_owed0_before,
+        tokens_owed1_before,
+    ) = read_position(base_slot)
+
+    let liquidity_next = if liquidity_delta == 0 {
+        assert_msg(liquidity_before > 0, "NP")
+        liquidity_before
+    } else {
+        add_delta(liquidity_before, liquidity_delta)
+    }
+
+    let tokens_owed0_delta: u128 = mul_div(
+        fee_growth_inside0_x128 - fee_growth_inside0_last_x128,
+        liquidity_before as u256,
+        denominator: Q128,
+    )
+        .downcast_unchecked()
+    let tokens_owed1_delta: u128 = mul_div(
+        fee_growth_inside1_x128 - fee_growth_inside1_last_x128,
+        liquidity_before as u256,
+        denominator: Q128,
+    )
+        .downcast_unchecked()
+
+    if liquidity_delta != 0 {
+        store_liquidity(base_slot, value: liquidity_next)
+    }
+    evm.sstore(slot: base_slot + 1, value: fee_growth_inside0_x128)
+    evm.sstore(slot: base_slot + 2, value: fee_growth_inside1_x128)
+
+    if tokens_owed0_delta > 0 || tokens_owed1_delta > 0 {
+        store_tokens_owed(
+            base_slot,
+            token0: tokens_owed0_before + tokens_owed0_delta,
+            token1: tokens_owed1_before + tokens_owed1_delta,
+        )
+    }
+}
