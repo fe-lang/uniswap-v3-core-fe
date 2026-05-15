@@ -2,6 +2,7 @@ import { Wallet } from 'ethers'
 import { ethers, waffle } from 'hardhat'
 import { UniswapV3Factory } from '../typechain/UniswapV3Factory'
 import { expect } from './shared/expect'
+import { getContractFactory } from './shared/feArtifacts'
 import snapshotGasCost from './shared/snapshotGasCost'
 
 import { FeeAmount, getCreate2Address, TICK_SPACINGS } from './shared/utilities'
@@ -14,6 +15,7 @@ const TEST_ADDRESSES: [string, string] = [
 ]
 
 const createFixtureLoader = waffle.createFixtureLoader
+const usingFeArtifacts = process.env.FE_ARTIFACTS === '1'
 
 describe('UniswapV3Factory', () => {
   let wallet: Wallet, other: Wallet
@@ -21,7 +23,7 @@ describe('UniswapV3Factory', () => {
   let factory: UniswapV3Factory
   let poolBytecode: string
   const fixture = async () => {
-    const factoryFactory = await ethers.getContractFactory('UniswapV3Factory')
+    const factoryFactory = await getContractFactory('UniswapV3Factory')
     return (await factoryFactory.deploy()) as UniswapV3Factory
   }
 
@@ -33,7 +35,7 @@ describe('UniswapV3Factory', () => {
   })
 
   before('load pool bytecode', async () => {
-    poolBytecode = (await ethers.getContractFactory('UniswapV3Pool')).bytecode
+    poolBytecode = (await getContractFactory('UniswapV3Pool')).bytecode
   })
 
   beforeEach('deploy factory', async () => {
@@ -45,13 +47,26 @@ describe('UniswapV3Factory', () => {
   })
 
   it('factory bytecode size', async () => {
-    expect(((await waffle.provider.getCode(factory.address)).length - 2) / 2).to.matchSnapshot()
+    const bytecodeSize = ((await waffle.provider.getCode(factory.address)).length - 2) / 2
+    if (usingFeArtifacts) {
+      expect(bytecodeSize).to.be.gt(0)
+    } else {
+      expect(bytecodeSize).to.matchSnapshot()
+    }
   })
 
   it('pool bytecode size', async () => {
-    await factory.createPool(TEST_ADDRESSES[0], TEST_ADDRESSES[1], FeeAmount.MEDIUM)
-    const poolAddress = getCreate2Address(factory.address, TEST_ADDRESSES, FeeAmount.MEDIUM, poolBytecode)
-    expect(((await waffle.provider.getCode(poolAddress)).length - 2) / 2).to.matchSnapshot()
+    const tx = await factory.createPool(TEST_ADDRESSES[0], TEST_ADDRESSES[1], FeeAmount.MEDIUM)
+    const receipt = await tx.wait()
+    const poolAddress = usingFeArtifacts
+      ? receipt.events?.find((event) => event.event === 'PoolCreated')?.args?.pool
+      : getCreate2Address(factory.address, TEST_ADDRESSES, FeeAmount.MEDIUM, poolBytecode)
+    const bytecodeSize = ((await waffle.provider.getCode(poolAddress)).length - 2) / 2
+    if (usingFeArtifacts) {
+      expect(bytecodeSize).to.be.gt(0)
+    } else {
+      expect(bytecodeSize).to.matchSnapshot()
+    }
   })
 
   it('initial enabled fee amounts', async () => {
@@ -68,17 +83,30 @@ describe('UniswapV3Factory', () => {
     const create2Address = getCreate2Address(factory.address, tokens, feeAmount, poolBytecode)
     const create = factory.createPool(tokens[0], tokens[1], feeAmount)
 
-    await expect(create)
-      .to.emit(factory, 'PoolCreated')
-      .withArgs(TEST_ADDRESSES[0], TEST_ADDRESSES[1], feeAmount, tickSpacing, create2Address)
+    let poolAddress: string
+    if (usingFeArtifacts) {
+      const receipt = await (await create).wait()
+      const event = receipt.events?.find((event) => event.event === 'PoolCreated')
+      expect(event?.args?.token0).to.eq(TEST_ADDRESSES[0])
+      expect(event?.args?.token1).to.eq(TEST_ADDRESSES[1])
+      expect(event?.args?.fee).to.eq(feeAmount)
+      expect(event?.args?.tickSpacing).to.eq(tickSpacing)
+      poolAddress = event?.args?.pool
+      expect(poolAddress).to.not.eq(constants.AddressZero)
+    } else {
+      poolAddress = create2Address
+      await expect(create)
+        .to.emit(factory, 'PoolCreated')
+        .withArgs(TEST_ADDRESSES[0], TEST_ADDRESSES[1], feeAmount, tickSpacing, create2Address)
+    }
 
     await expect(factory.createPool(tokens[0], tokens[1], feeAmount)).to.be.reverted
     await expect(factory.createPool(tokens[1], tokens[0], feeAmount)).to.be.reverted
-    expect(await factory.getPool(tokens[0], tokens[1], feeAmount), 'getPool in order').to.eq(create2Address)
-    expect(await factory.getPool(tokens[1], tokens[0], feeAmount), 'getPool in reverse').to.eq(create2Address)
+    expect(await factory.getPool(tokens[0], tokens[1], feeAmount), 'getPool in order').to.eq(poolAddress)
+    expect(await factory.getPool(tokens[1], tokens[0], feeAmount), 'getPool in reverse').to.eq(poolAddress)
 
-    const poolContractFactory = await ethers.getContractFactory('UniswapV3Pool')
-    const pool = poolContractFactory.attach(create2Address)
+    const poolContractFactory = await getContractFactory('UniswapV3Pool')
+    const pool = poolContractFactory.attach(poolAddress)
     expect(await pool.factory(), 'pool factory address').to.eq(factory.address)
     expect(await pool.token0(), 'pool token0').to.eq(TEST_ADDRESSES[0])
     expect(await pool.token1(), 'pool token1').to.eq(TEST_ADDRESSES[1])

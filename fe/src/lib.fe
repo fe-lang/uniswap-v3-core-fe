@@ -1,1 +1,3 @@
 pub use libraries::{self}
+pub use uniswap_v3_factory::{self}
+pub use uniswap_v3_pool::{self}

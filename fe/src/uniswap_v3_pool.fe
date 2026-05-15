@@ -1,0 +1,80 @@
+use std::abi::sol
+use std::evm::{Address, Call, Ctx}
+use super::libraries::tick::tick_spacing_to_max_liquidity_per_tick
+
+msg PoolDeployerMsg {
+    #[selector = sol("parameters()")]
+    Parameters -> (u256, u256, u256, u32, i32),
+}
+
+msg UniswapV3PoolMsg {
+    #[selector = sol("factory()")]
+    Factory -> u256,
+
+    #[selector = sol("token0()")]
+    Token0 -> u256,
+
+    #[selector = sol("token1()")]
+    Token1 -> u256,
+
+    #[selector = sol("fee()")]
+    Fee -> u32,
+
+    #[selector = sol("tickSpacing()")]
+    TickSpacing -> i32,
+
+    #[selector = sol("maxLiquidityPerTick()")]
+    MaxLiquidityPerTick -> u128,
+}
+
+struct PoolStore {
+    factory: Address,
+    token0: Address,
+    token1: Address,
+    fee: u32,
+    tick_spacing: i32,
+    max_liquidity_per_tick: u128,
+}
+
+pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call) {
+    mut store: PoolStore,
+
+    init()
+    uses (ctx, mut call, mut store)
+    {
+        let params: (u256, u256, u256, u32, i32) = ctx.caller().call(PoolDeployerMsg::Parameters {})
+        let (factory, token0, token1, fee, tick_spacing) = params
+        store.factory = Address { inner: factory }
+        store.token0 = Address { inner: token0 }
+        store.token1 = Address { inner: token1 }
+        store.fee = fee
+        store.tick_spacing = tick_spacing
+        store.max_liquidity_per_tick = tick_spacing_to_max_liquidity_per_tick(tick_spacing as i256)
+    }
+
+    recv UniswapV3PoolMsg {
+        Factory -> u256 uses (store) {
+            store.factory.inner
+        }
+
+        Token0 -> u256 uses (store) {
+            store.token0.inner
+        }
+
+        Token1 -> u256 uses (store) {
+            store.token1.inner
+        }
+
+        Fee -> u32 uses (store) {
+            store.fee
+        }
+
+        TickSpacing -> i32 uses (store) {
+            store.tick_spacing
+        }
+
+        MaxLiquidityPerTick -> u128 uses (store) {
+            store.max_liquidity_per_tick
+        }
+    }
+}

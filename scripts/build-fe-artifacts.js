@@ -27,6 +27,155 @@ const oracleInitializeParamsComponents = [
 ]
 
 const abiOverrides = {
+  UniswapV3Factory: [
+    {
+      type: 'constructor',
+      inputs: [],
+      stateMutability: 'nonpayable',
+    },
+    {
+      type: 'event',
+      name: 'OwnerChanged',
+      inputs: [
+        { name: 'oldOwner', type: 'address', indexed: true },
+        { name: 'newOwner', type: 'address', indexed: true },
+      ],
+    },
+    {
+      type: 'event',
+      name: 'PoolCreated',
+      inputs: [
+        { name: 'token0', type: 'address', indexed: true },
+        { name: 'token1', type: 'address', indexed: true },
+        { name: 'fee', type: 'uint24', indexed: true },
+        { name: 'tickSpacing', type: 'int24', indexed: false },
+        { name: 'pool', type: 'address', indexed: false },
+      ],
+    },
+    {
+      type: 'event',
+      name: 'FeeAmountEnabled',
+      inputs: [
+        { name: 'fee', type: 'uint24', indexed: true },
+        { name: 'tickSpacing', type: 'int24', indexed: true },
+      ],
+    },
+    {
+      type: 'function',
+      name: 'parameters',
+      inputs: [],
+      outputs: [
+        { name: 'factory', type: 'address' },
+        { name: 'token0', type: 'address' },
+        { name: 'token1', type: 'address' },
+        { name: 'fee', type: 'uint24' },
+        { name: 'tickSpacing', type: 'int24' },
+      ],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
+      name: 'owner',
+      inputs: [],
+      outputs: [{ name: '', type: 'address' }],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
+      name: 'feeAmountTickSpacing',
+      inputs: [{ name: 'fee', type: 'uint24' }],
+      outputs: [{ name: '', type: 'int24' }],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
+      name: 'getPool',
+      inputs: [
+        { name: 'tokenA', type: 'address' },
+        { name: 'tokenB', type: 'address' },
+        { name: 'fee', type: 'uint24' },
+      ],
+      outputs: [{ name: 'pool', type: 'address' }],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
+      name: 'createPool',
+      inputs: [
+        { name: 'tokenA', type: 'address' },
+        { name: 'tokenB', type: 'address' },
+        { name: 'fee', type: 'uint24' },
+      ],
+      outputs: [{ name: 'pool', type: 'address' }],
+      stateMutability: 'nonpayable',
+    },
+    {
+      type: 'function',
+      name: 'setOwner',
+      inputs: [{ name: '_owner', type: 'address' }],
+      outputs: [],
+      stateMutability: 'nonpayable',
+    },
+    {
+      type: 'function',
+      name: 'enableFeeAmount',
+      inputs: [
+        { name: 'fee', type: 'uint24' },
+        { name: 'tickSpacing', type: 'int24' },
+      ],
+      outputs: [],
+      stateMutability: 'nonpayable',
+    },
+  ],
+  UniswapV3Pool: [
+    {
+      type: 'constructor',
+      inputs: [],
+      stateMutability: 'nonpayable',
+    },
+    {
+      type: 'function',
+      name: 'factory',
+      inputs: [],
+      outputs: [{ name: '', type: 'address' }],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
+      name: 'token0',
+      inputs: [],
+      outputs: [{ name: '', type: 'address' }],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
+      name: 'token1',
+      inputs: [],
+      outputs: [{ name: '', type: 'address' }],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
+      name: 'fee',
+      inputs: [],
+      outputs: [{ name: '', type: 'uint24' }],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
+      name: 'tickSpacing',
+      inputs: [],
+      outputs: [{ name: '', type: 'int24' }],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
+      name: 'maxLiquidityPerTick',
+      inputs: [],
+      outputs: [{ name: '', type: 'uint128' }],
+      stateMutability: 'view',
+    },
+  ],
   NoDelegateCallTest: [
     {
       type: 'function',
