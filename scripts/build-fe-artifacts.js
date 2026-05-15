@@ -363,6 +363,16 @@ const abiOverrides = {
     },
     {
       type: 'function',
+      name: 'observe',
+      inputs: [{ name: 'secondsAgos', type: 'uint32[]' }],
+      outputs: [
+        { name: 'tickCumulatives', type: 'int56[]' },
+        { name: 'secondsPerLiquidityCumulativeX128s', type: 'uint160[]' },
+      ],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
       name: 'initialize',
       inputs: [{ name: 'sqrtPriceX96', type: 'uint160' }],
       outputs: [],
@@ -374,13 +384,6 @@ const abiOverrides = {
       inputs: [{ name: 'observationCardinalityNext', type: 'uint16' }],
       outputs: [],
       stateMutability: 'nonpayable',
-    },
-    {
-      type: 'function',
-      name: 'time',
-      inputs: [],
-      outputs: [{ name: '', type: 'uint256' }],
-      stateMutability: 'view',
     },
     {
       type: 'function',

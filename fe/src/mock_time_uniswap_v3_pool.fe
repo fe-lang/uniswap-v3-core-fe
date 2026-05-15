@@ -57,9 +57,6 @@ msg MockTimeUniswapV3PoolMsg {
     #[selector = sol("increaseObservationCardinalityNext(uint16)")]
     IncreaseObservationCardinalityNext { observationCardinalityNext: u16 },
 
-    #[selector = sol("time()")]
-    Time -> u256,
-
     #[selector = sol("advanceTime(uint256)")]
     AdvanceTime { by: u256 },
 
@@ -86,6 +83,9 @@ msg MockTimeUniswapV3PoolMsg {
 
     #[selector = 0x490e6cbc]
     Flash,
+
+    #[selector = 0x883bdbfd]
+    Observe,
 
     #[selector = sol("ticks(int24)")]
     Ticks { tick: Int24 } -> (u128, i128, u256, u256, i64, u256, u32, bool),
@@ -138,7 +138,6 @@ struct MockTimePoolStore {
     observation0_block_timestamp: u32,
     observation0_tick_cumulative: i64,
     observation0_seconds_per_liquidity_cumulative_x128: u256,
-    observation0_initialized: bool,
     time: u256,
     liquidity: u128,
     fee_growth_global0_x128: u256,
@@ -398,12 +397,11 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
         Observations { index } -> (u32, i64, u256, bool)
         uses (store)
         {
-            assert(index == 0)
             (
                 store.observation0_block_timestamp,
                 store.observation0_tick_cumulative,
                 store.observation0_seconds_per_liquidity_cumulative_x128,
-                store.observation0_initialized,
+                true,
             )
         }
 
@@ -424,7 +422,6 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             store.observation0_block_timestamp = store.time.downcast_unchecked()
             store.observation0_tick_cumulative = 0
             store.observation0_seconds_per_liquidity_cumulative_x128 = 0
-            store.observation0_initialized = true
             emit_initialize(sqrt_price_x96: sqrtPriceX96.val, tick)
         }
 
@@ -444,10 +441,6 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 emit_increase_observation_cardinality_next(old, new)
             }
             store.unlocked = true
-        }
-
-        Time -> u256 uses (store) {
-            store.time
         }
 
         AdvanceTime { by } uses (mut store) {
@@ -500,7 +493,22 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
         }
 
         Flash uses (store) {
-            assert_msg(!(store.liquidity == 0), "L")
+            assert_msg(store.liquidity != 0, "L")
+        }
+
+        Observe uses (mut evm, store) {
+            let current_time: u32 = store.time.downcast_unchecked()
+            let time_delta = current_time - store.observation0_block_timestamp
+            let tick_cumulative = (store.observation0_tick_cumulative as i256)
+                + ((store.tick as i256) * (time_delta as i256))
+            let out = std::evm::mem::alloc(192)
+            evm.mstore(addr: out, value: 64)
+            evm.mstore(addr: out + 32, value: 128)
+            evm.mstore(addr: out + 64, value: 1)
+            evm.mstore(addr: out + 96, value: int_key(tick_cumulative))
+            evm.mstore(addr: out + 128, value: 1)
+            evm.mstore(addr: out + 160, value: 0)
+            evm.return_data(offset: out, len: 192)
         }
 
         Ticks { tick } -> (u128, i128, u256, u256, i64, u256, u32, bool)
