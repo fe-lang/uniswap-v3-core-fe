@@ -2,6 +2,7 @@ import { ethers } from 'hardhat'
 import { BigNumber } from 'ethers'
 import { TickTest } from '../typechain/TickTest'
 import { expect } from './shared/expect'
+import { getContractFactory } from './shared/feArtifacts'
 import { FeeAmount, getMaxLiquidityPerTick, TICK_SPACINGS } from './shared/utilities'
 
 const MaxUint128 = BigNumber.from(2).pow(128).sub(1)
@@ -12,7 +13,7 @@ describe('Tick', () => {
   let tickTest: TickTest
 
   beforeEach('deploy TickTest', async () => {
-    const tickTestFactory = await ethers.getContractFactory('TickTest')
+    const tickTestFactory = await getContractFactory('TickTest')
     tickTest = (await tickTestFactory.deploy()) as TickTest
   })
 

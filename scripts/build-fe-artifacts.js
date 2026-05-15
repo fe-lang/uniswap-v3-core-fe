@@ -9,7 +9,99 @@ const hardhatOutDir = path.join(feRoot, 'hardhat-artifacts')
 const feBin = process.env.FE_BIN || '/Users/sean/code/fe/pr-review/target/release/fe'
 const contracts = process.argv.slice(2)
 
+const tickInfoComponents = [
+  { name: 'liquidityGross', type: 'uint128' },
+  { name: 'liquidityNet', type: 'int128' },
+  { name: 'feeGrowthOutside0X128', type: 'uint256' },
+  { name: 'feeGrowthOutside1X128', type: 'uint256' },
+  { name: 'tickCumulativeOutside', type: 'int56' },
+  { name: 'secondsPerLiquidityOutsideX128', type: 'uint160' },
+  { name: 'secondsOutside', type: 'uint32' },
+  { name: 'initialized', type: 'bool' },
+]
+
 const abiOverrides = {
+  TickTest: [
+    {
+      type: 'function',
+      name: 'ticks',
+      inputs: [{ name: 'tick', type: 'int24' }],
+      outputs: tickInfoComponents,
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
+      name: 'tickSpacingToMaxLiquidityPerTick',
+      inputs: [{ name: 'tickSpacing', type: 'int24' }],
+      outputs: [{ name: '', type: 'uint128' }],
+      stateMutability: 'pure',
+    },
+    {
+      type: 'function',
+      name: 'setTick',
+      inputs: [
+        { name: 'tick', type: 'int24' },
+        { name: 'info', type: 'tuple', components: tickInfoComponents },
+      ],
+      outputs: [],
+      stateMutability: 'nonpayable',
+    },
+    {
+      type: 'function',
+      name: 'getFeeGrowthInside',
+      inputs: [
+        { name: 'tickLower', type: 'int24' },
+        { name: 'tickUpper', type: 'int24' },
+        { name: 'tickCurrent', type: 'int24' },
+        { name: 'feeGrowthGlobal0X128', type: 'uint256' },
+        { name: 'feeGrowthGlobal1X128', type: 'uint256' },
+      ],
+      outputs: [
+        { name: 'feeGrowthInside0X128', type: 'uint256' },
+        { name: 'feeGrowthInside1X128', type: 'uint256' },
+      ],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
+      name: 'update',
+      inputs: [
+        { name: 'tick', type: 'int24' },
+        { name: 'tickCurrent', type: 'int24' },
+        { name: 'liquidityDelta', type: 'int128' },
+        { name: 'feeGrowthGlobal0X128', type: 'uint256' },
+        { name: 'feeGrowthGlobal1X128', type: 'uint256' },
+        { name: 'secondsPerLiquidityCumulativeX128', type: 'uint160' },
+        { name: 'tickCumulative', type: 'int56' },
+        { name: 'time', type: 'uint32' },
+        { name: 'upper', type: 'bool' },
+        { name: 'maxLiquidity', type: 'uint128' },
+      ],
+      outputs: [{ name: 'flipped', type: 'bool' }],
+      stateMutability: 'nonpayable',
+    },
+    {
+      type: 'function',
+      name: 'clear',
+      inputs: [{ name: 'tick', type: 'int24' }],
+      outputs: [],
+      stateMutability: 'nonpayable',
+    },
+    {
+      type: 'function',
+      name: 'cross',
+      inputs: [
+        { name: 'tick', type: 'int24' },
+        { name: 'feeGrowthGlobal0X128', type: 'uint256' },
+        { name: 'feeGrowthGlobal1X128', type: 'uint256' },
+        { name: 'secondsPerLiquidityCumulativeX128', type: 'uint160' },
+        { name: 'tickCumulative', type: 'int56' },
+        { name: 'time', type: 'uint32' },
+      ],
+      outputs: [{ name: 'liquidityNet', type: 'int128' }],
+      stateMutability: 'nonpayable',
+    },
+  ],
   TickBitmapTest: [
     {
       type: 'function',

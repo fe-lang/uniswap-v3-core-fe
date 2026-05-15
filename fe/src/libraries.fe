@@ -3,6 +3,8 @@ pub use full_math::{self}
 pub use liquidity_math::{self}
 pub use sqrt_price_math::{self}
 pub use swap_math::{self}
+pub use tick::{self}
 pub use tick_math::{self}
 pub use tick_bitmap::{self}
+pub use safe_cast::{self}
 pub use unsafe_math::{self}

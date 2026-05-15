@@ -3,7 +3,7 @@ use std::evm::{assert_msg, Ctx, Evm}
 
 const MAX_U128: u128 = 0xffffffffffffffffffffffffffffffff
 
-pub fn add_delta(x: u128, y: i128) -> u128 {
+pub fn add_delta(_ x: u128, _ y: i128) -> u128 {
     if y < 0 {
         let delta: u128 = (0 - y).downcast_unchecked()
         assert_msg(x >= delta, "LS")

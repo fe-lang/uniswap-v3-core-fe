@@ -1,0 +1,7 @@
+const MAX_I128: i256 = 0x7fffffffffffffffffffffffffffffff
+const MIN_I128: i256 = -0x80000000000000000000000000000000
+
+pub fn to_int128(_ y: i256) -> i128 {
+    assert(y >= MIN_I128 && y <= MAX_I128)
+    y.downcast_unchecked()
+}

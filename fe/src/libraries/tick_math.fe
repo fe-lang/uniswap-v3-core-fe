@@ -1,7 +1,7 @@
 use std::evm::Evm
 
-const MIN_TICK: i256 = -887272
-const MAX_TICK: i256 = 887272
+pub const MIN_TICK: i256 = -887272
+pub const MAX_TICK: i256 = 887272
 const MIN_SQRT_RATIO: u256 = 4295128739
 const MAX_SQRT_RATIO: u256 = 1461446703485210103287273052203988822378723970342
 const MAX_U160: u256 = 0xffffffffffffffffffffffffffffffffffffffff
