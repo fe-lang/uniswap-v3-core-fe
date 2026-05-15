@@ -1686,7 +1686,7 @@ describe('UniswapV3Pool', () => {
 
     it('cannot reenter from swap callback', async () => {
       const reentrant = (await (
-        await ethers.getContractFactory('TestUniswapV3ReentrantCallee')
+        await getContractFactory('TestUniswapV3ReentrantCallee')
       ).deploy()) as TestUniswapV3ReentrantCallee
 
       // the tests happen in solidity
