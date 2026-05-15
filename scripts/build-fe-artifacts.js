@@ -221,6 +221,14 @@ const abiOverrides = {
       stateMutability: 'nonpayable',
     },
     {
+      type: 'event',
+      name: 'Initialize',
+      inputs: [
+        { name: 'sqrtPriceX96', type: 'uint160', indexed: false },
+        { name: 'tick', type: 'int24', indexed: false },
+      ],
+    },
+    {
       type: 'function',
       name: 'factory',
       inputs: [],
@@ -261,6 +269,40 @@ const abiOverrides = {
       inputs: [],
       outputs: [{ name: '', type: 'uint128' }],
       stateMutability: 'view',
+    },
+    {
+      type: 'function',
+      name: 'slot0',
+      inputs: [],
+      outputs: [
+        { name: 'sqrtPriceX96', type: 'uint160' },
+        { name: 'tick', type: 'int24' },
+        { name: 'observationIndex', type: 'uint16' },
+        { name: 'observationCardinality', type: 'uint16' },
+        { name: 'observationCardinalityNext', type: 'uint16' },
+        { name: 'feeProtocol', type: 'uint8' },
+        { name: 'unlocked', type: 'bool' },
+      ],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
+      name: 'observations',
+      inputs: [{ name: 'index', type: 'uint256' }],
+      outputs: [
+        { name: 'blockTimestamp', type: 'uint32' },
+        { name: 'tickCumulative', type: 'int56' },
+        { name: 'secondsPerLiquidityCumulativeX128', type: 'uint160' },
+        { name: 'initialized', type: 'bool' },
+      ],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
+      name: 'initialize',
+      inputs: [{ name: 'sqrtPriceX96', type: 'uint160' }],
+      outputs: [],
+      stateMutability: 'nonpayable',
     },
     {
       type: 'function',

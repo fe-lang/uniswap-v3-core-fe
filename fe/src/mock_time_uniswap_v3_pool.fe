@@ -1,8 +1,11 @@
-use std::abi::sol
-use std::evm::{Address, Call, Ctx}
+use std::abi::sol::{self, Uint160}
+use std::evm::{assert_msg, Address, Call, Ctx, Evm, Log, RawMem}
 use super::libraries::tick::tick_spacing_to_max_liquidity_per_tick
+use super::libraries::tick_bitmap::int_key
+use super::libraries::tick_math::{get_tick_at_sqrt_ratio, max_sqrt_ratio, min_sqrt_ratio}
 
 const TEST_POOL_START_TIME: u256 = 1601906400
+const INITIALIZE_TOPIC: u256 = 0x98636036cb66a9c19a37435efc1e90142190214e8abeb821bdba3f2990dd4c95
 
 msg MockTimePoolDeployerMsg {
     #[selector = sol("parameters()")]
@@ -27,6 +30,15 @@ msg MockTimeUniswapV3PoolMsg {
 
     #[selector = sol("maxLiquidityPerTick()")]
     MaxLiquidityPerTick -> u128,
+
+    #[selector = sol("slot0()")]
+    Slot0 -> (u256, i32, u16, u16, u16, u8, bool),
+
+    #[selector = sol("observations(uint256)")]
+    Observations { index: u256 } -> (u32, i64, u256, bool),
+
+    #[selector = sol("initialize(uint160)")]
+    Initialize { sqrtPriceX96: Uint160 },
 
     #[selector = sol("time()")]
     Time -> u256,
@@ -54,12 +66,34 @@ struct MockTimePoolStore {
     fee: u32,
     tick_spacing: i32,
     max_liquidity_per_tick: u128,
+    sqrt_price_x96: u256,
+    tick: i32,
+    observation_index: u16,
+    observation_cardinality: u16,
+    observation_cardinality_next: u16,
+    fee_protocol: u8,
+    unlocked: bool,
+    observation0_block_timestamp: u32,
+    observation0_tick_cumulative: i64,
+    observation0_seconds_per_liquidity_cumulative_x128: u256,
+    observation0_initialized: bool,
     time: u256,
     fee_growth_global0_x128: u256,
     fee_growth_global1_x128: u256,
 }
 
-pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call) {
+fn int24_abi_word(_ value: i32) -> u256 {
+    int_key(value as i256)
+}
+
+fn emit_initialize(sqrt_price_x96: u256, tick: i32) uses (evm: mut Evm) {
+    let ptr = std::evm::mem::alloc(0)
+    evm.mstore(addr: ptr, value: sqrt_price_x96)
+    evm.mstore(addr: ptr + 32, value: int24_abi_word(tick))
+    evm.log1(offset: ptr, len: 64, topic0: INITIALIZE_TOPIC)
+}
+
+pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
     mut store: MockTimePoolStore,
 
     init()
@@ -101,6 +135,53 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call) {
 
         MaxLiquidityPerTick -> u128 uses (store) {
             store.max_liquidity_per_tick
+        }
+
+        Slot0 -> (u256, i32, u16, u16, u16, u8, bool)
+        uses (store)
+        {
+            (
+                store.sqrt_price_x96,
+                store.tick,
+                store.observation_index,
+                store.observation_cardinality,
+                store.observation_cardinality_next,
+                store.fee_protocol,
+                store.unlocked,
+            )
+        }
+
+        Observations { index } -> (u32, i64, u256, bool)
+        uses (store)
+        {
+            assert(index == 0)
+            (
+                store.observation0_block_timestamp,
+                store.observation0_tick_cumulative,
+                store.observation0_seconds_per_liquidity_cumulative_x128,
+                store.observation0_initialized,
+            )
+        }
+
+        Initialize { sqrtPriceX96 } uses (mut store, mut evm) {
+            assert(store.sqrt_price_x96 == 0)
+            assert_msg(
+                sqrtPriceX96.val >= min_sqrt_ratio() && sqrtPriceX96.val < max_sqrt_ratio(),
+                "R",
+            )
+            let tick: i32 = get_tick_at_sqrt_ratio(sqrt_price_x96: sqrtPriceX96.val)
+                .downcast_unchecked()
+            store.sqrt_price_x96 = sqrtPriceX96.val
+            store.tick = tick
+            store.observation_index = 0
+            store.observation_cardinality = 1
+            store.observation_cardinality_next = 1
+            store.unlocked = true
+            store.observation0_block_timestamp = store.time.downcast_unchecked()
+            store.observation0_tick_cumulative = 0
+            store.observation0_seconds_per_liquidity_cumulative_x128 = 0
+            store.observation0_initialized = true
+            emit_initialize(sqrt_price_x96: sqrtPriceX96.val, tick)
         }
 
         Time -> u256 uses (store) {
