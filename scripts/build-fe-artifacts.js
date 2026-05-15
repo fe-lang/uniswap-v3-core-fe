@@ -10,6 +10,50 @@ const feBin = process.env.FE_BIN || '/Users/sean/code/fe/pr-review/target/releas
 const contracts = process.argv.slice(2)
 
 const abiOverrides = {
+  TickMathTest: [
+    {
+      type: 'function',
+      name: 'getSqrtRatioAtTick',
+      inputs: [{ name: 'tick', type: 'int24' }],
+      outputs: [{ name: '', type: 'uint160' }],
+      stateMutability: 'pure',
+    },
+    {
+      type: 'function',
+      name: 'getGasCostOfGetSqrtRatioAtTick',
+      inputs: [{ name: 'tick', type: 'int24' }],
+      outputs: [{ name: '', type: 'uint256' }],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
+      name: 'getTickAtSqrtRatio',
+      inputs: [{ name: 'sqrtPriceX96', type: 'uint160' }],
+      outputs: [{ name: '', type: 'int24' }],
+      stateMutability: 'pure',
+    },
+    {
+      type: 'function',
+      name: 'getGasCostOfGetTickAtSqrtRatio',
+      inputs: [{ name: 'sqrtPriceX96', type: 'uint160' }],
+      outputs: [{ name: '', type: 'uint256' }],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
+      name: 'MIN_SQRT_RATIO',
+      inputs: [],
+      outputs: [{ name: '', type: 'uint160' }],
+      stateMutability: 'pure',
+    },
+    {
+      type: 'function',
+      name: 'MAX_SQRT_RATIO',
+      inputs: [],
+      outputs: [{ name: '', type: 'uint160' }],
+      stateMutability: 'pure',
+    },
+  ],
   SwapMathTest: [
     {
       type: 'function',
