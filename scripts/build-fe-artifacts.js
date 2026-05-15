@@ -229,6 +229,14 @@ const abiOverrides = {
       ],
     },
     {
+      type: 'event',
+      name: 'IncreaseObservationCardinalityNext',
+      inputs: [
+        { name: 'observationCardinalityNextOld', type: 'uint16', indexed: false },
+        { name: 'observationCardinalityNextNew', type: 'uint16', indexed: false },
+      ],
+    },
+    {
       type: 'function',
       name: 'factory',
       inputs: [],
@@ -301,6 +309,13 @@ const abiOverrides = {
       type: 'function',
       name: 'initialize',
       inputs: [{ name: 'sqrtPriceX96', type: 'uint160' }],
+      outputs: [],
+      stateMutability: 'nonpayable',
+    },
+    {
+      type: 'function',
+      name: 'increaseObservationCardinalityNext',
+      inputs: [{ name: 'observationCardinalityNext', type: 'uint16' }],
       outputs: [],
       stateMutability: 'nonpayable',
     },
