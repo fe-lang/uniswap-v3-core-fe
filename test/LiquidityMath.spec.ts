@@ -1,6 +1,7 @@
 import { expect } from './shared/expect'
 import { LiquidityMathTest } from '../typechain/LiquidityMathTest'
 import { ethers, waffle } from 'hardhat'
+import { getContractFactory } from './shared/feArtifacts'
 import snapshotGasCost from './shared/snapshotGasCost'
 
 const { BigNumber } = ethers
@@ -8,7 +9,7 @@ const { BigNumber } = ethers
 describe('LiquidityMath', () => {
   let liquidityMath: LiquidityMathTest
   const fixture = async () => {
-    const factory = await ethers.getContractFactory('LiquidityMathTest')
+    const factory = await getContractFactory('LiquidityMathTest')
     return (await factory.deploy()) as LiquidityMathTest
   }
   beforeEach('deploy LiquidityMathTest', async () => {

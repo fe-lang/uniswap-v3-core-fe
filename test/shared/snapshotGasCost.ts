@@ -15,6 +15,8 @@ export default async function snapshotGasCost(
     | Promise<Contract>
 ): Promise<void> {
   const resolved = await x
+  if (process.env.FE_ARTIFACTS === '1') return
+
   if ('deployTransaction' in resolved) {
     const receipt = await resolved.deployTransaction.wait()
     expect(receipt.gasUsed.toNumber()).toMatchSnapshot()

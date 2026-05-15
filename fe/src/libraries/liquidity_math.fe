@@ -1,0 +1,42 @@
+use std::abi::sol
+use std::evm::{assert_msg, Ctx, Evm}
+
+const MAX_U128: u128 = 0xffffffffffffffffffffffffffffffff
+
+pub fn add_delta(x: u128, y: i128) -> u128 {
+    if y < 0 {
+        let delta: u128 = (0 - y).downcast_unchecked()
+        assert_msg(x >= delta, "LS")
+        let z = x - delta
+        assert_msg(z < x, "LS")
+        return z
+    }
+
+    let delta: u128 = y.downcast_unchecked()
+    assert_msg(x <= MAX_U128 - delta, "LA")
+    let z = x + delta
+    assert_msg(z >= x, "LA")
+    z
+}
+
+msg LiquidityMathTestMsg {
+    #[selector = sol("addDelta(uint128,int128)")]
+    AddDelta { x: u128, y: i128 } -> u128,
+
+    #[selector = sol("getGasCostOfAddDelta(uint128,int128)")]
+    GetGasCostOfAddDelta { x: u128, y: i128 } -> u256,
+}
+
+pub contract LiquidityMathTest uses (evm: Evm) {
+    recv LiquidityMathTestMsg {
+        AddDelta { x, y } -> u128 {
+            add_delta(x, y)
+        }
+
+        GetGasCostOfAddDelta { x, y } -> u256 uses (evm) {
+            let gas_before = evm.gas()
+            add_delta(x, y)
+            gas_before - evm.gas()
+        }
+    }
+}

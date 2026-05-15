@@ -1,108 +1,72 @@
 use std::abi::sol
+use std::evm::{Ctx, Evm}
 
 pub fn most_significant_bit(x: u256) -> u8 {
     assert(x > 0)
 
     let mut value = x
-    let mut r: u8 = 0
+    let mut r: u256 = 0
 
-    if value >= 0x100000000000000000000000000000000 {
-        value = value >> 128
-        r = r + 128
+    while value > 1 {
+        value = value >> 1
+        r = r + 1
     }
-    if value >= 0x10000000000000000 {
-        value = value >> 64
-        r = r + 64
-    }
-    if value >= 0x100000000 {
-        value = value >> 32
-        r = r + 32
-    }
-    if value >= 0x10000 {
-        value = value >> 16
-        r = r + 16
-    }
-    if value >= 0x100 {
-        value = value >> 8
-        r = r + 8
-    }
-    if value >= 0x10 {
-        value = value >> 4
-        r = r + 4
-    }
-    if value >= 0x4 {
-        value = value >> 2
-        r = r + 2
-    }
-    if value >= 0x2 { r = r + 1 }
 
-    r
+    r.downcast_unchecked()
 }
 
 pub fn least_significant_bit(x: u256) -> u8 {
     assert(x > 0)
 
     let mut value = x
-    let mut r: u8 = 255
+    let mut r: u256 = 0
 
-    if value & 0xffffffffffffffffffffffffffffffff > 0 {
-        r = r - 128
-    } else {
-        value = value >> 128
-    }
-    if value & 0xffffffffffffffff > 0 {
-        r = r - 64
-    } else {
-        value = value >> 64
-    }
-    if value & 0xffffffff > 0 {
-        r = r - 32
-    } else {
-        value = value >> 32
-    }
-    if value & 0xffff > 0 {
-        r = r - 16
-    } else {
-        value = value >> 16
-    }
-    if value & 0xff > 0 {
-        r = r - 8
-    } else {
-        value = value >> 8
-    }
-    if value & 0xf > 0 {
-        r = r - 4
-    } else {
-        value = value >> 4
-    }
-    if value & 0x3 > 0 {
-        r = r - 2
-    } else {
-        value = value >> 2
-    }
-    if value & 0x1 > 0 {
-        r = r - 1
+    while (value & 1) == 0 {
+        value = value >> 1
+        r = r + 1
     }
 
-    r
+    r.downcast_unchecked()
 }
 
 msg BitMathTestMsg {
     #[selector = sol("mostSignificantBit(uint256)")]
     MostSignificantBit { x: u256 } -> u8,
 
+    #[selector = sol("getGasCostOfMostSignificantBit(uint256)")]
+    GetGasCostOfMostSignificantBit { x: u256 } -> u256,
+
     #[selector = sol("leastSignificantBit(uint256)")]
     LeastSignificantBit { x: u256 } -> u8,
+
+    #[selector = sol("getGasCostOfLeastSignificantBit(uint256)")]
+    GetGasCostOfLeastSignificantBit { x: u256 } -> u256,
 }
 
-pub contract BitMathTest {
+pub contract BitMathTest uses (evm: Evm) {
     recv BitMathTestMsg {
         MostSignificantBit { x } -> u8 {
             most_significant_bit(x)
         }
 
+        GetGasCostOfMostSignificantBit { x } -> u256
+        uses (evm)
+        {
+            let gas_before = evm.gas()
+            most_significant_bit(x)
+            gas_before - evm.gas()
+        }
+
         LeastSignificantBit { x } -> u8 {
             least_significant_bit(x)
+        }
+
+        GetGasCostOfLeastSignificantBit { x } -> u256
+        uses (evm)
+        {
+            let gas_before = evm.gas()
+            least_significant_bit(x)
+            gas_before - evm.gas()
         }
     }
 }
