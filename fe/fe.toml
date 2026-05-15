@@ -1,0 +1,6 @@
+[ingot]
+name = "uniswap_v3_core_fe"
+version = "0.1.0"
+
+[dependencies]
+std = { path = "../../fe/pr-review/ingots/std" }

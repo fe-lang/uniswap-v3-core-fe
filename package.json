@@ -54,6 +54,7 @@
   },
   "scripts": {
     "compile": "hardhat compile",
+    "compile:fe": "node scripts/build-fe-artifacts.js",
     "test": "hardhat test"
   }
 }

@@ -1,5 +1,7 @@
 artifacts/
 cache/
 crytic-export/
+fe/hardhat-artifacts/
+fe/out/
 node_modules/
 typechain/
