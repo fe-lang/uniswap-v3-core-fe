@@ -1,0 +1,130 @@
+use std::abi::sol
+use std::evm::{Address, Call, Ctx}
+use super::libraries::tick::tick_spacing_to_max_liquidity_per_tick
+
+const TEST_POOL_START_TIME: u256 = 1601906400
+
+msg MockTimePoolDeployerMsg {
+    #[selector = sol("parameters()")]
+    Parameters -> (u256, u256, u256, u32, i32),
+}
+
+msg MockTimeUniswapV3PoolMsg {
+    #[selector = sol("factory()")]
+    Factory -> u256,
+
+    #[selector = sol("token0()")]
+    Token0 -> u256,
+
+    #[selector = sol("token1()")]
+    Token1 -> u256,
+
+    #[selector = sol("fee()")]
+    Fee -> u32,
+
+    #[selector = sol("tickSpacing()")]
+    TickSpacing -> i32,
+
+    #[selector = sol("maxLiquidityPerTick()")]
+    MaxLiquidityPerTick -> u128,
+
+    #[selector = sol("time()")]
+    Time -> u256,
+
+    #[selector = sol("advanceTime(uint256)")]
+    AdvanceTime { by: u256 },
+
+    #[selector = sol("setFeeGrowthGlobal0X128(uint256)")]
+    SetFeeGrowthGlobal0X128 { value: u256 },
+
+    #[selector = sol("setFeeGrowthGlobal1X128(uint256)")]
+    SetFeeGrowthGlobal1X128 { value: u256 },
+
+    #[selector = sol("feeGrowthGlobal0X128()")]
+    FeeGrowthGlobal0X128 -> u256,
+
+    #[selector = sol("feeGrowthGlobal1X128()")]
+    FeeGrowthGlobal1X128 -> u256,
+}
+
+struct MockTimePoolStore {
+    factory: Address,
+    token0: Address,
+    token1: Address,
+    fee: u32,
+    tick_spacing: i32,
+    max_liquidity_per_tick: u128,
+    time: u256,
+    fee_growth_global0_x128: u256,
+    fee_growth_global1_x128: u256,
+}
+
+pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call) {
+    mut store: MockTimePoolStore,
+
+    init()
+    uses (ctx, mut call, mut store)
+    {
+        let params: (u256, u256, u256, u32, i32) = ctx
+            .caller()
+            .call(MockTimePoolDeployerMsg::Parameters {})
+        let (factory, token0, token1, fee, tick_spacing) = params
+        store.factory = Address { inner: factory }
+        store.token0 = Address { inner: token0 }
+        store.token1 = Address { inner: token1 }
+        store.fee = fee
+        store.tick_spacing = tick_spacing
+        store.max_liquidity_per_tick = tick_spacing_to_max_liquidity_per_tick(tick_spacing as i256)
+        store.time = TEST_POOL_START_TIME
+    }
+
+    recv MockTimeUniswapV3PoolMsg {
+        Factory -> u256 uses (store) {
+            store.factory.inner
+        }
+
+        Token0 -> u256 uses (store) {
+            store.token0.inner
+        }
+
+        Token1 -> u256 uses (store) {
+            store.token1.inner
+        }
+
+        Fee -> u32 uses (store) {
+            store.fee
+        }
+
+        TickSpacing -> i32 uses (store) {
+            store.tick_spacing
+        }
+
+        MaxLiquidityPerTick -> u128 uses (store) {
+            store.max_liquidity_per_tick
+        }
+
+        Time -> u256 uses (store) {
+            store.time
+        }
+
+        AdvanceTime { by } uses (mut store) {
+            store.time += by
+        }
+
+        SetFeeGrowthGlobal0X128 { value } uses (mut store) {
+            store.fee_growth_global0_x128 = value
+        }
+
+        SetFeeGrowthGlobal1X128 { value } uses (mut store) {
+            store.fee_growth_global1_x128 = value
+        }
+
+        FeeGrowthGlobal0X128 -> u256 uses (store) {
+            store.fee_growth_global0_x128
+        }
+
+        FeeGrowthGlobal1X128 -> u256 uses (store) {
+            store.fee_growth_global1_x128
+        }
+    }
+}
