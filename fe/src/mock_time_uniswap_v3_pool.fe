@@ -82,7 +82,10 @@ msg MockTimeUniswapV3PoolMsg {
     SetFeeProtocol { feeProtocol0: u8, feeProtocol1: u8 },
 
     #[selector = 0x85b66729]
-    CollectProtocol -> (u128, u128),
+    CollectProtocol -> (u256, u256),
+
+    #[selector = 0x490e6cbc]
+    Flash,
 
     #[selector = sol("ticks(int24)")]
     Ticks { tick: Int24 } -> (u128, i128, u256, u256, i64, u256, u32, bool),
@@ -477,10 +480,9 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             assert(
                 ctx.caller().inner == factory_owner(factory: store.factory),
             )
-            assert(
-                (((1 as u256) << (feeProtocol0 as u256)) & 0x7f1) != 0
-                    && (((1 as u256) << (feeProtocol1 as u256)) & 0x7f1) != 0,
-            )
+            let fee_mask = ((1 as u256) << (feeProtocol0 as u256))
+                | ((1 as u256) << (feeProtocol1 as u256))
+            assert((fee_mask & 0x7f1) == fee_mask)
 
             let old = store.fee_protocol
             store.fee_protocol = ((feeProtocol0 as u256) | ((feeProtocol1 as u256) << 4))
@@ -493,8 +495,12 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             evm.log1(offset: ptr, len: 128, topic0: SET_FEE_PROTOCOL_TOPIC)
         }
 
-        CollectProtocol -> (u128, u128) {
+        CollectProtocol -> (u256, u256) {
             (0, 0)
+        }
+
+        Flash uses (store) {
+            assert_msg(!(store.liquidity == 0), "L")
         }
 
         Ticks { tick } -> (u128, i128, u256, u256, i64, u256, u32, bool)

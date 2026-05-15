@@ -281,6 +281,18 @@ const abiOverrides = {
       ],
     },
     {
+      type: 'event',
+      name: 'Flash',
+      inputs: [
+        { name: 'sender', type: 'address', indexed: true },
+        { name: 'recipient', type: 'address', indexed: true },
+        { name: 'amount0', type: 'uint256', indexed: false },
+        { name: 'amount1', type: 'uint256', indexed: false },
+        { name: 'paid0', type: 'uint256', indexed: false },
+        { name: 'paid1', type: 'uint256', indexed: false },
+      ],
+    },
+    {
       type: 'function',
       name: 'factory',
       inputs: [],
@@ -500,6 +512,18 @@ const abiOverrides = {
         { name: 'amount0', type: 'uint128' },
         { name: 'amount1', type: 'uint128' },
       ],
+      stateMutability: 'nonpayable',
+    },
+    {
+      type: 'function',
+      name: 'flash',
+      inputs: [
+        { name: 'recipient', type: 'address' },
+        { name: 'amount0', type: 'uint256' },
+        { name: 'amount1', type: 'uint256' },
+        { name: 'data', type: 'bytes' },
+      ],
+      outputs: [],
       stateMutability: 'nonpayable',
     },
   ],

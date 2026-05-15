@@ -1,27 +1,8 @@
 use std::abi::sol::{self, Int24, Uint24}
 use std::evm::{Address, Create, Evm, Log, RawMem}
-use super::libraries::tick_bitmap::int_key
 use super::mock_time_uniswap_v3_pool::MockTimeUniswapV3Pool
 
-const MASK_U24: u256 = 0xffffff
 const POOL_DEPLOYED_TOPIC: u256 = 0xf0d1eeab175eee2e20b8dc452773bf2257b25724b323b42bc6e5b4616233ae1f
-
-fn int24_word(_ value: Int24) -> u256 {
-    int_key(value.val as i256) & MASK_U24
-}
-
-fn packed_pool_salt(token0: Address, token1: Address, fee: Uint24, tick_spacing: Int24) -> u256
-uses (evm: mut Evm)
-{
-    let ptr = std::evm::mem::alloc(0)
-    let word0 = (token0.inner << 96) | (token1.inner >> 64)
-    let word1 = ((token1.inner & 0xffffffffffffffff) << 192)
-        | ((fee.val as u256) << 168)
-        | (int24_word(tick_spacing) << 144)
-    evm.mstore(addr: ptr, value: word0)
-    evm.mstore(addr: ptr + 32, value: word1)
-    evm.keccak256(offset: ptr, len: 46)
-}
 
 fn emit_pool_deployed(_ pool: Address) uses (evm: mut Evm) {
     let ptr = std::evm::mem::alloc(0)
@@ -49,7 +30,7 @@ pub contract MockTimeUniswapV3PoolDeployer uses (evm: mut Evm) {
                 .create2<MockTimeUniswapV3Pool>(
                     value: 0,
                     args: (factory, token0, token1, fee, tickSpacing),
-                    salt: packed_pool_salt(token0, token1, fee, tick_spacing: tickSpacing),
+                    salt: 0,
                 )
             emit_pool_deployed(pool)
             pool.inner
