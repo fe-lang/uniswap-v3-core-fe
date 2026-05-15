@@ -271,6 +271,56 @@ const abiOverrides = {
       stateMutability: 'nonpayable',
     },
   ],
+  TestUniswapV3Router: [
+    {
+      type: 'constructor',
+      inputs: [],
+      stateMutability: 'nonpayable',
+    },
+    {
+      type: 'event',
+      name: 'SwapCallback',
+      inputs: [
+        { name: 'amount0Delta', type: 'int256', indexed: false },
+        { name: 'amount1Delta', type: 'int256', indexed: false },
+      ],
+    },
+    {
+      type: 'function',
+      name: 'swapForExact0Multi',
+      inputs: [
+        { name: 'recipient', type: 'address' },
+        { name: 'poolInput', type: 'address' },
+        { name: 'poolOutput', type: 'address' },
+        { name: 'amount0Out', type: 'uint256' },
+      ],
+      outputs: [],
+      stateMutability: 'nonpayable',
+    },
+    {
+      type: 'function',
+      name: 'swapForExact1Multi',
+      inputs: [
+        { name: 'recipient', type: 'address' },
+        { name: 'poolInput', type: 'address' },
+        { name: 'poolOutput', type: 'address' },
+        { name: 'amount1Out', type: 'uint256' },
+      ],
+      outputs: [],
+      stateMutability: 'nonpayable',
+    },
+    {
+      type: 'function',
+      name: 'uniswapV3SwapCallback',
+      inputs: [
+        { name: 'amount0Delta', type: 'int256' },
+        { name: 'amount1Delta', type: 'int256' },
+        { name: 'data', type: 'bytes' },
+      ],
+      outputs: [],
+      stateMutability: 'nonpayable',
+    },
+  ],
   UniswapV3Factory: [
     {
       type: 'constructor',

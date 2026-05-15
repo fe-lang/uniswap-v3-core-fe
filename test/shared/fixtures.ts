@@ -63,7 +63,7 @@ export const poolFixture: Fixture<PoolFixture> = async function (): Promise<Pool
   const MockTimeUniswapV3PoolFactory = await getContractFactory('MockTimeUniswapV3Pool')
 
   const calleeContractFactory = await getContractFactory('TestUniswapV3Callee')
-  const routerContractFactory = await ethers.getContractFactory('TestUniswapV3Router')
+  const routerContractFactory = await getContractFactory('TestUniswapV3Router')
 
   const swapTargetCallee = (await calleeContractFactory.deploy()) as TestUniswapV3Callee
   const swapTargetRouter = (await routerContractFactory.deploy()) as TestUniswapV3Router

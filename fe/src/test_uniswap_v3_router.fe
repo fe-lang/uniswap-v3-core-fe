@@ -1,0 +1,232 @@
+use std::abi::sol::{self, Uint160}
+use std::evm::{Address, Ctx, Evm, Log, RawMem}
+use super::libraries::safe_cast::to_int256
+use super::libraries::tick_bitmap::int_key
+use super::libraries::tick_math::{max_sqrt_ratio, min_sqrt_ratio}
+
+const MASK_U160: u256 = 0xffffffffffffffffffffffffffffffffffffffff
+const SWAP_CALLBACK_TOPIC: u256 = 0xd48241df4a75e663b29e55f9506b31f77ed0f48cfe7e7612d1163144995dc1ca
+
+msg PoolMsg {
+    #[selector = sol("token0()")]
+    Token0 -> u256,
+
+    #[selector = sol("token1()")]
+    Token1 -> u256,
+
+    #[selector = sol("swap(address,bool,int256,uint160,bytes)")]
+    Swap {
+        recipient: Address,
+        zeroForOne: bool,
+        amountSpecified: i256,
+        sqrtPriceLimitX96: Uint160,
+        data: Bytes,
+    } -> (i256, i256),
+}
+
+msg TokenMsg {
+    #[selector = sol("transferFrom(address,address,uint256)")]
+    TransferFrom { sender: Address, recipient: Address, amount: u256 } -> bool,
+}
+
+msg TestUniswapV3RouterMsg {
+    #[selector = sol("swapForExact0Multi(address,address,address,uint256)")]
+    SwapForExact0Multi {
+        recipient: Address,
+        poolInput: Address,
+        poolOutput: Address,
+        amount0Out: u256,
+    },
+
+    #[selector = sol("swapForExact1Multi(address,address,address,uint256)")]
+    SwapForExact1Multi {
+        recipient: Address,
+        poolInput: Address,
+        poolOutput: Address,
+        amount1Out: u256,
+    },
+
+    #[selector = sol("uniswapV3SwapCallback(int256,int256,bytes)")]
+    UniswapV3SwapCallback { amount0Delta: i256, amount1Delta: i256, data: Bytes },
+}
+
+fn as_address(_ value: u256) -> Address {
+    Address { inner: value & MASK_U160 }
+}
+
+fn exact_output_amount(_ amount_out: u256) -> i256 {
+    0 - to_int256(amount_out)
+}
+
+fn single_pool_payload(pool: Address, payer: Address) -> Bytes
+uses (evm: mut Evm)
+{
+    let ptr = std::evm::mem::alloc(160)
+    evm.mstore(addr: ptr, value: 128)
+    evm.mstore(addr: ptr + 32, value: 64)
+    evm.mstore(addr: ptr + 64, value: payer.inner)
+    evm.mstore(addr: ptr + 96, value: 1)
+    evm.mstore(addr: ptr + 128, value: pool.inner)
+    Bytes { data: ptr, len: 128, size: 160 }
+}
+
+fn empty_pools_payload(payer: Address) -> Bytes uses (evm: mut Evm) {
+    let ptr = std::evm::mem::alloc(128)
+    evm.mstore(addr: ptr, value: 96)
+    evm.mstore(addr: ptr + 32, value: 64)
+    evm.mstore(addr: ptr + 64, value: payer.inner)
+    evm.mstore(addr: ptr + 96, value: 0)
+    Bytes { data: ptr, len: 96, size: 128 }
+}
+
+fn decode_payer(data: Bytes) -> Address uses (evm: Evm) {
+    assert(data.len() >= 96)
+    as_address(evm.mload(data.data + 64))
+}
+
+fn decode_pool_count(data: Bytes) -> u256 uses (evm: Evm) {
+    assert(data.len() >= 96)
+    evm.mload(data.data + 96)
+}
+
+fn decode_first_pool(data: Bytes) -> Address uses (evm: Evm) {
+    assert(data.len() >= 128)
+    as_address(evm.mload(data.data + 128))
+}
+
+fn token0(_ pool: Address) -> Address uses (evm: mut Evm) {
+    as_address(
+        evm.call(
+            addr: pool,
+            gas: 1000000,
+            value: 0,
+            message: PoolMsg::Token0 {},
+        ),
+    )
+}
+
+fn token1(_ pool: Address) -> Address uses (evm: mut Evm) {
+    as_address(
+        evm.call(
+            addr: pool,
+            gas: 1000000,
+            value: 0,
+            message: PoolMsg::Token1 {},
+        ),
+    )
+}
+
+fn transfer_from(token: Address, sender: Address, recipient: Address, amount: u256)
+uses (evm: mut Evm)
+{
+    assert(
+        evm.call(
+            addr: token,
+            gas: 1000000,
+            value: 0,
+            message: TokenMsg::TransferFrom { sender, recipient, amount },
+        ),
+    )
+}
+
+fn emit_swap_callback(amount0_delta: i256, amount1_delta: i256)
+uses (evm: mut Evm)
+{
+    let ptr = std::evm::mem::alloc(64)
+    evm.mstore(addr: ptr, value: int_key(amount0_delta))
+    evm.mstore(addr: ptr + 32, value: int_key(amount1_delta))
+    evm.log1(offset: ptr, len: 64, topic0: SWAP_CALLBACK_TOPIC)
+}
+
+pub contract TestUniswapV3Router uses (ctx: Ctx, evm: mut Evm) {
+    recv TestUniswapV3RouterMsg {
+        SwapForExact0Multi { recipient, poolInput, poolOutput, amount0Out }
+        uses (ctx, mut evm)
+        {
+            let _ = evm
+                .call(
+                    addr: poolOutput,
+                    gas: 1000000,
+                    value: 0,
+                    message: PoolMsg::Swap {
+                        recipient,
+                        zeroForOne: false,
+                        amountSpecified: exact_output_amount(amount0Out),
+                        sqrtPriceLimitX96: Uint160 { val: max_sqrt_ratio() - 1 },
+                        data: single_pool_payload(pool: poolInput, payer: ctx.caller()),
+                    },
+                )
+        }
+
+        SwapForExact1Multi { recipient, poolInput, poolOutput, amount1Out }
+        uses (ctx, mut evm)
+        {
+            let _ = evm
+                .call(
+                    addr: poolOutput,
+                    gas: 1000000,
+                    value: 0,
+                    message: PoolMsg::Swap {
+                        recipient,
+                        zeroForOne: true,
+                        amountSpecified: exact_output_amount(amount1Out),
+                        sqrtPriceLimitX96: Uint160 { val: min_sqrt_ratio() + 1 },
+                        data: single_pool_payload(pool: poolInput, payer: ctx.caller()),
+                    },
+                )
+        }
+
+        UniswapV3SwapCallback { amount0Delta, amount1Delta, data }
+        uses (ctx, mut evm)
+        {
+            emit_swap_callback(amount0_delta: amount0Delta, amount1_delta: amount1Delta)
+            let payer = decode_payer(data)
+            let pool_count = decode_pool_count(data)
+
+            if pool_count == 1 {
+                let pool = decode_first_pool(data)
+                let token_to_be_paid = if amount0Delta > 0 {
+                    token0(ctx.caller())
+                } else {
+                    token1(ctx.caller())
+                }
+                let amount_to_be_paid = if amount0Delta > 0 {
+                    amount0Delta
+                } else {
+                    amount1Delta
+                }
+                let zero_for_one = token_to_be_paid == token1(pool)
+                let sqrt_price_limit_x96 = if zero_for_one {
+                    min_sqrt_ratio() + 1
+                } else {
+                    max_sqrt_ratio() - 1
+                }
+                let _ = evm
+                    .call(
+                        addr: pool,
+                        gas: 1000000,
+                        value: 0,
+                        message: PoolMsg::Swap {
+                            recipient: ctx.caller(),
+                            zeroForOne: zero_for_one,
+                            amountSpecified: 0 - amount_to_be_paid,
+                            sqrtPriceLimitX96: Uint160 { val: sqrt_price_limit_x96 },
+                            data: empty_pools_payload(payer),
+                        },
+                    )
+            } else {
+                let token = if amount0Delta > 0 {
+                    token0(ctx.caller())
+                } else {
+                    token1(ctx.caller())
+                }
+                let amount = if amount0Delta > 0 {
+                    int_key(amount0Delta)
+                } else {
+                    int_key(amount1Delta)
+                }
+                transfer_from(token, sender: payer, recipient: ctx.caller(), amount)
+            }
+        }
+    }
+}
