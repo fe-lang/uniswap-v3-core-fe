@@ -1,13 +1,13 @@
-import { ethers } from 'hardhat'
 import { TickBitmapTest } from '../typechain/TickBitmapTest'
 import { expect } from './shared/expect'
+import { getContractFactory } from './shared/feArtifacts'
 import snapshotGasCost from './shared/snapshotGasCost'
 
 describe('TickBitmap', () => {
   let tickBitmap: TickBitmapTest
 
   beforeEach('deploy TickBitmapTest', async () => {
-    const tickBitmapTestFactory = await ethers.getContractFactory('TickBitmapTest')
+    const tickBitmapTestFactory = await getContractFactory('TickBitmapTest')
     tickBitmap = (await tickBitmapTestFactory.deploy()) as TickBitmapTest
   })
 

@@ -1,7 +1,7 @@
 use std::abi::sol
 use std::evm::{Ctx, Evm}
 
-pub fn most_significant_bit(x: u256) -> u8 {
+pub fn most_significant_bit(_ x: u256) -> u8 {
     assert(x > 0)
 
     let mut value = x
@@ -15,7 +15,7 @@ pub fn most_significant_bit(x: u256) -> u8 {
     r.downcast_unchecked()
 }
 
-pub fn least_significant_bit(x: u256) -> u8 {
+pub fn least_significant_bit(_ x: u256) -> u8 {
     assert(x > 0)
 
     let mut value = x

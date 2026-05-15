@@ -10,6 +10,52 @@ const feBin = process.env.FE_BIN || '/Users/sean/code/fe/pr-review/target/releas
 const contracts = process.argv.slice(2)
 
 const abiOverrides = {
+  TickBitmapTest: [
+    {
+      type: 'function',
+      name: 'flipTick',
+      inputs: [{ name: 'tick', type: 'int24' }],
+      outputs: [],
+      stateMutability: 'nonpayable',
+    },
+    {
+      type: 'function',
+      name: 'getGasCostOfFlipTick',
+      inputs: [{ name: 'tick', type: 'int24' }],
+      outputs: [{ name: '', type: 'uint256' }],
+      stateMutability: 'nonpayable',
+    },
+    {
+      type: 'function',
+      name: 'nextInitializedTickWithinOneWord',
+      inputs: [
+        { name: 'tick', type: 'int24' },
+        { name: 'lte', type: 'bool' },
+      ],
+      outputs: [
+        { name: 'next', type: 'int24' },
+        { name: 'initialized', type: 'bool' },
+      ],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
+      name: 'getGasCostOfNextInitializedTickWithinOneWord',
+      inputs: [
+        { name: 'tick', type: 'int24' },
+        { name: 'lte', type: 'bool' },
+      ],
+      outputs: [{ name: '', type: 'uint256' }],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
+      name: 'isInitialized',
+      inputs: [{ name: 'tick', type: 'int24' }],
+      outputs: [{ name: '', type: 'bool' }],
+      stateMutability: 'view',
+    },
+  ],
   TickMathTest: [
     {
       type: 'function',
