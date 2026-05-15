@@ -1,12 +1,12 @@
 use std::abi::sol::{self, Bytes32, Int24, Uint160}
-use std::evm::{assert_msg, Address, Call, Ctx, Evm, Log, RawMem, StorageMap}
+use std::evm::{assert_msg, Address, Call, Ctx, Evm, Log, RawMem}
 use super::libraries::liquidity_math::add_delta
 use super::libraries::position
 use super::libraries::safe_cast::to_int128
 use super::libraries::sqrt_price_math::{get_amount0_delta, get_amount1_delta}
 use super::libraries::tick
 use super::libraries::tick::tick_spacing_to_max_liquidity_per_tick
-use super::libraries::tick_bitmap::{flip_tick, int_key}
+use super::libraries::tick_bitmap::{flip_tick_at, int_key}
 use super::libraries::tick_math::{
     get_sqrt_ratio_at_tick,
     get_tick_at_sqrt_ratio,
@@ -17,6 +17,8 @@ use super::libraries::tick_math::{
 }
 
 const TEST_POOL_START_TIME: u256 = 1601906400
+const TICKS_SLOT: u256 = 5
+const TICK_BITMAP_SLOT: u256 = 6
 const POSITIONS_SLOT: u256 = 7
 const INITIALIZE_TOPIC: u256 = 0x98636036cb66a9c19a37435efc1e90142190214e8abeb821bdba3f2990dd4c95
 const INCREASE_OBSERVATION_CARDINALITY_NEXT_TOPIC: u256 = 0xac49e518f90a358f652e4400164f05a5d8f7e35e7747279bc3a93dbf584e125a
@@ -124,7 +126,6 @@ struct MockTimePoolStore {
     liquidity: u128,
     fee_growth_global0_x128: u256,
     fee_growth_global1_x128: u256,
-    tick_bitmap: StorageMap<u256, u256>,
 }
 
 fn int24_abi_word(_ value: i32) -> u256 {
@@ -345,7 +346,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 seconds_per_liquidity_outside_x128,
                 seconds_outside,
                 initialized,
-            ) = tick::read_tick(tick.val as i256)
+            ) = tick::read_tick_at(tick.val as i256, ticks_slot: TICKS_SLOT)
             (
                 liquidity_gross,
                 liquidity_net,
@@ -393,7 +394,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 liquidity: store.liquidity,
             )
 
-            let flipped_lower = tick::update(
+            let flipped_lower = tick::update_at(
                 tick: tick_lower,
                 tick_current: store.tick as i256,
                 liquidity_delta,
@@ -404,8 +405,9 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 time: current_time,
                 upper: false,
                 max_liquidity: store.max_liquidity_per_tick,
+                ticks_slot: TICKS_SLOT,
             )
-            let flipped_upper = tick::update(
+            let flipped_upper = tick::update_at(
                 tick: tick_upper,
                 tick_current: store.tick as i256,
                 liquidity_delta,
@@ -416,25 +418,31 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 time: current_time,
                 upper: true,
                 max_liquidity: store.max_liquidity_per_tick,
+                ticks_slot: TICKS_SLOT,
             )
 
             if flipped_lower {
-                with (store.tick_bitmap) {
-                    flip_tick(tick: tick_lower, tick_spacing: store.tick_spacing as i256)
-                }
+                flip_tick_at(
+                    tick: tick_lower,
+                    tick_spacing: store.tick_spacing as i256,
+                    bitmap_slot: TICK_BITMAP_SLOT,
+                )
             }
             if flipped_upper {
-                with (store.tick_bitmap) {
-                    flip_tick(tick: tick_upper, tick_spacing: store.tick_spacing as i256)
-                }
+                flip_tick_at(
+                    tick: tick_upper,
+                    tick_spacing: store.tick_spacing as i256,
+                    bitmap_slot: TICK_BITMAP_SLOT,
+                )
             }
 
-            let (fee_growth_inside0_x128, fee_growth_inside1_x128) = tick::get_fee_growth_inside(
+            let (fee_growth_inside0_x128, fee_growth_inside1_x128) = tick::get_fee_growth_inside_at(
                 tick_lower,
                 tick_upper,
                 tick_current: store.tick as i256,
                 fee_growth_global0_x128: store.fee_growth_global0_x128,
                 fee_growth_global1_x128: store.fee_growth_global1_x128,
+                ticks_slot: TICKS_SLOT,
             )
             let position_slot = position::position_slot(
                 owner: recipient,

@@ -1,4 +1,4 @@
-use std::evm::{Evm, StorageMap}
+use std::evm::{mem, Evm, RawMem, RawStorage, StorageMap}
 use super::bit_math::{least_significant_bit, most_significant_bit}
 
 const U256_MAX: u256 = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
@@ -15,6 +15,13 @@ fn position(_ tick: i256) -> (i256, u256) {
     (tick >> 8, int_key(tick) & 0xff)
 }
 
+fn word_slot(word_pos: i256, bitmap_slot: u256) -> u256 uses (evm: mut Evm) {
+    let ptr = mem::alloc(0)
+    evm.mstore(addr: ptr, value: int_key(word_pos))
+    evm.mstore(addr: ptr + 32, value: bitmap_slot)
+    evm.keccak256(offset: ptr, len: 64)
+}
+
 #[arithmetic(unchecked)]
 pub fn flip_tick(tick: i256, tick_spacing: i256)
 uses (bitmap: mut StorageMap<u256, u256>)
@@ -24,6 +31,17 @@ uses (bitmap: mut StorageMap<u256, u256>)
     let key = int_key(word_pos)
     let mask = 1 << bit_pos
     bitmap.set(key: key, value: bitmap.get(key) ^ mask)
+}
+
+#[arithmetic(unchecked)]
+pub fn flip_tick_at(tick: i256, tick_spacing: i256, bitmap_slot: u256)
+uses (evm: mut Evm)
+{
+    assert(tick % tick_spacing == 0)
+    let (word_pos, bit_pos) = position(tick / tick_spacing)
+    let slot = word_slot(word_pos, bitmap_slot: bitmap_slot)
+    let mask = 1 << bit_pos
+    evm.sstore(slot: slot, value: evm.sload(slot) ^ mask)
 }
 
 #[arithmetic(unchecked)]
