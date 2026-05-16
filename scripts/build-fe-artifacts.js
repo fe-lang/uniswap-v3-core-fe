@@ -7,6 +7,7 @@ const feRoot = path.join(repoRoot, 'fe')
 const feOutDir = path.join(feRoot, 'out')
 const hardhatOutDir = path.join(feRoot, 'hardhat-artifacts')
 const feBin = process.env.FE_BIN || '/Users/sean/code/fe/uni-v3-compiler-v3/target/release/fe'
+const feOptimize = process.env.FE_OPTIMIZE || 's'
 const contracts = process.argv.slice(2)
 
 const tickInfoComponents = [
@@ -1318,7 +1319,7 @@ function prefixedHex(hex) {
 }
 
 function runFeBuild(contract) {
-  const args = ['build', feRoot, '--out-dir', feOutDir]
+  const args = ['build', feRoot, '--optimize', feOptimize, '--out-dir', feOutDir]
   if (contract) args.push('--contract', contract)
 
   const result = spawnSync(feBin, args, {

@@ -30,6 +30,7 @@ const COLLECT_TOPIC: u256 = 0x70935338e69775456a85ddef226c395fb668b63fa0115f5f20
 const SET_FEE_PROTOCOL_TOPIC: u256 = 0x973d8d92bb299f4af6ce49b52a8adb85ae46b9f214c4c4fc06ac77401237b133
 const FLASH_TOPIC: u256 = 0xbdbdb71d7860376ba52b25a5028beea23581364a40522f6bcfb86bb1f2dca633
 const FLASH_CALLBACK_SELECTOR: u256 = 0xe9cbafb0
+const SWAP_CALLBACK_SELECTOR: u256 = 0xfa461e33
 
 msg MockTimeUniswapV3PoolMsg {
     #[selector = sol("factory()")]
@@ -174,6 +175,10 @@ fn check_ticks(tick_lower: i256, tick_upper: i256) {
     assert_msg(tick_lower < tick_upper, "TLU")
     assert_msg(tick_lower >= MIN_TICK, "TLM")
     assert_msg(tick_upper <= MAX_TICK, "TUM")
+}
+
+fn check_unlocked(_ unlocked: bool) {
+    assert_msg(unlocked, "LOK")
 }
 
 fn current_tick_cumulative(tick_cumulative: i64, tick_current: i32, time_delta: u32) -> i256 {
@@ -531,7 +536,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
         IncreaseObservationCardinalityNext { observationCardinalityNext }
         uses (mut store, mut evm)
         {
-            assert_msg(store.unlocked, "LOK")
+            check_unlocked(store.unlocked)
             store.unlocked = false
             let old = store.observation_cardinality_next
             let new = if observationCardinalityNext > old {
@@ -666,11 +671,13 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             evm.log1(offset: 0, len: 128, topic0: SET_FEE_PROTOCOL_TOPIC)
         }
 
-        CollectProtocol -> (u256, u256) {
+        CollectProtocol -> (u256, u256) uses (store) {
+            check_unlocked(store.unlocked)
             (0, 0)
         }
 
         Flash uses (ctx, mut call, mut evm, mut store) {
+            check_unlocked(store.unlocked)
             assert_msg(store.liquidity != 0, "L")
             let recipient = Address { inner: evm.calldataload(4) }
             let amount0 = evm.calldataload(36)
@@ -714,10 +721,30 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             )
         }
 
-        Swap uses (mut evm) {
+        Swap uses (ctx, mut evm, mut store) {
+            check_unlocked(store.unlocked)
             let zero_for_one = evm.calldataload(36) != 0
             let data_offset = evm.calldataload(132)
             let data_start = 4 + data_offset
+            let data_len = evm.calldataload(data_start)
+            if data_len == 0 {
+                store.unlocked = false
+                evm.mstore(addr: 0, value: SWAP_CALLBACK_SELECTOR << 224)
+                evm.mstore(addr: 4, value: 0)
+                evm.mstore(addr: 36, value: 0)
+                evm.mstore(addr: 68, value: 96)
+                evm.mstore(addr: 100, value: 0)
+                evm.raw_call(
+                    addr: ctx.caller(),
+                    gas: 1000000,
+                    value: 0,
+                    args_offset: 0,
+                    args_len: 132,
+                )
+                let ret_len = evm.returndatasize()
+                evm.returndatacopy(dest: 0, offset: 0, len: ret_len)
+                evm.revert(offset: 0, len: ret_len)
+            }
             let pay0 = evm.calldataload(data_start + 64)
             let pay1 = evm.calldataload(data_start + 96)
             if zero_for_one {
@@ -951,7 +978,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
         Mint { recipient, tickLower, tickUpper, amount, data } -> (u256, u256)
         uses (ctx, mut call, mut evm, mut store)
         {
-            assert_msg(store.unlocked, "LOK")
+            check_unlocked(store.unlocked)
             store.unlocked = false
 
             assert(amount > 0)
@@ -1032,7 +1059,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
         )
         uses (ctx, mut evm, mut store)
         {
-            assert_msg(store.unlocked, "LOK")
+            check_unlocked(store.unlocked)
             store.unlocked = false
 
             let position_slot = position::position_slot(
