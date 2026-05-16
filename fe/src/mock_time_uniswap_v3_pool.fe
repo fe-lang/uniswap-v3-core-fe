@@ -224,6 +224,11 @@ fn sub_i256(a: i256, b: i256) -> i256 {
     a - b
 }
 
+#[arithmetic(unchecked)]
+fn sub_u32(a: u32, b: u32) -> u32 {
+    a - b
+}
+
 fn copy_words(dest: u256, src: u256, len: u256) uses (evm: mut Evm) {
     let mut offset: u256 = 0
     while offset < len {
@@ -748,37 +753,64 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             assert(initialized_upper)
 
             let tick_current = store.tick as i256
-            assert(tick_current >= lower && tick_current < upper)
-            let current_time: u32 = store.time.downcast_unchecked()
-            let time_delta = current_time - store.observation0_block_timestamp
-            let tick_cumulative = current_tick_cumulative(
-                tick_cumulative: store.observation0_tick_cumulative,
-                tick_current: store.tick,
-                time_delta,
-            )
-            let seconds_per_liquidity_cumulative_x128 = current_seconds_per_liquidity(
-                seconds_per_liquidity_cumulative_x128: store
-                    .observation0_seconds_per_liquidity_cumulative_x128,
-                time_delta,
-                liquidity: store.liquidity,
-            )
-            let seconds_per_liquidity_inside_minus_lower = sub_u256(
-                a: seconds_per_liquidity_cumulative_x128,
-                b: seconds_per_liquidity_outside_lower,
-            )
-            let seconds_per_liquidity_inside_x128 = sub_u256(
-                a: seconds_per_liquidity_inside_minus_lower,
-                b: seconds_per_liquidity_outside_upper,
-            )
-            let seconds_inside = current_time - seconds_outside_lower - seconds_outside_upper
-            let tick_cumulative_inside_minus_lower = sub_i256(
-                a: tick_cumulative,
-                b: tick_cumulative_lower,
-            )
-            let tick_cumulative_inside = sub_i256(
-                a: tick_cumulative_inside_minus_lower,
-                b: tick_cumulative_upper,
-            )
+            let mut tick_cumulative_inside = 0
+            let mut seconds_per_liquidity_inside_x128 = 0
+            let mut seconds_inside: u32 = 0
+            if tick_current < lower {
+                tick_cumulative_inside = sub_i256(
+                    a: tick_cumulative_lower,
+                    b: tick_cumulative_upper,
+                )
+                seconds_per_liquidity_inside_x128 = sub_u256(
+                    a: seconds_per_liquidity_outside_lower,
+                    b: seconds_per_liquidity_outside_upper,
+                )
+                seconds_inside = sub_u32(a: seconds_outside_lower, b: seconds_outside_upper)
+            } else if tick_current < upper {
+                let current_time: u32 = store.time.downcast_unchecked()
+                let time_delta = current_time - store.observation0_block_timestamp
+                let tick_cumulative = current_tick_cumulative(
+                    tick_cumulative: store.observation0_tick_cumulative,
+                    tick_current: store.tick,
+                    time_delta,
+                )
+                let seconds_per_liquidity_cumulative_x128 = current_seconds_per_liquidity(
+                    seconds_per_liquidity_cumulative_x128: store
+                        .observation0_seconds_per_liquidity_cumulative_x128,
+                    time_delta,
+                    liquidity: store.liquidity,
+                )
+                let seconds_per_liquidity_inside_minus_lower = sub_u256(
+                    a: seconds_per_liquidity_cumulative_x128,
+                    b: seconds_per_liquidity_outside_lower,
+                )
+                seconds_per_liquidity_inside_x128 = sub_u256(
+                    a: seconds_per_liquidity_inside_minus_lower,
+                    b: seconds_per_liquidity_outside_upper,
+                )
+                seconds_inside = sub_u32(
+                    a: sub_u32(a: current_time, b: seconds_outside_lower),
+                    b: seconds_outside_upper,
+                )
+                let tick_cumulative_inside_minus_lower = sub_i256(
+                    a: tick_cumulative,
+                    b: tick_cumulative_lower,
+                )
+                tick_cumulative_inside = sub_i256(
+                    a: tick_cumulative_inside_minus_lower,
+                    b: tick_cumulative_upper,
+                )
+            } else {
+                tick_cumulative_inside = sub_i256(
+                    a: tick_cumulative_upper,
+                    b: tick_cumulative_lower,
+                )
+                seconds_per_liquidity_inside_x128 = sub_u256(
+                    a: seconds_per_liquidity_outside_upper,
+                    b: seconds_per_liquidity_outside_lower,
+                )
+                seconds_inside = sub_u32(a: seconds_outside_upper, b: seconds_outside_lower)
+            }
             return_snapshot(
                 tick_cumulative_inside,
                 seconds_per_liquidity_inside_x128,

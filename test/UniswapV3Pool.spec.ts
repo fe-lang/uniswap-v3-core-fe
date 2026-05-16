@@ -1828,6 +1828,28 @@ describe('UniswapV3Pool', () => {
       expect(tickCumulativeInside).to.eq(0)
       expect(secondsInside).to.eq(0)
     })
+    it('is zero immediately for a range below the current tick', async () => {
+      await mint(wallet.address, getMinTick(tickSpacing), tickLower, 15)
+      const {
+        secondsPerLiquidityInsideX128,
+        tickCumulativeInside,
+        secondsInside,
+      } = await pool.snapshotCumulativesInside(getMinTick(tickSpacing), tickLower)
+      expect(secondsPerLiquidityInsideX128).to.eq(0)
+      expect(tickCumulativeInside).to.eq(0)
+      expect(secondsInside).to.eq(0)
+    })
+    it('is zero immediately for a range above the current tick', async () => {
+      await mint(wallet.address, tickUpper, getMaxTick(tickSpacing), 15)
+      const {
+        secondsPerLiquidityInsideX128,
+        tickCumulativeInside,
+        secondsInside,
+      } = await pool.snapshotCumulativesInside(tickUpper, getMaxTick(tickSpacing))
+      expect(secondsPerLiquidityInsideX128).to.eq(0)
+      expect(tickCumulativeInside).to.eq(0)
+      expect(secondsInside).to.eq(0)
+    })
     it('increases by expected amount when time elapses in the range', async () => {
       await pool.advanceTime(5)
       const {
