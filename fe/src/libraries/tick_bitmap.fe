@@ -1,3 +1,4 @@
+use std::abi::sol::{self, Int24}
 use std::evm::{mem, Evm, RawMem, RawStorage, StorageMap}
 use super::bit_math::{least_significant_bit, most_significant_bit}
 
@@ -91,6 +92,16 @@ uses (bitmap: StorageMap<u256, u256>)
 
 struct TickBitmapStore { bitmap: StorageMap<u256, u256> }
 
+fn is_initialized(_ tick: i256) -> bool uses (bitmap: StorageMap<u256, u256>) {
+    let (next, initialized) = next_initialized_tick_within_one_word(
+        tick,
+        tick_spacing: 1,
+        lte: true,
+    )
+
+    next == tick && initialized
+}
+
 msg TickBitmapTestMsg {
     #[selector = 0x8815912f]
     FlipTick { tick: i256 },
@@ -145,11 +156,76 @@ pub contract TickBitmapTest uses (evm: Evm) {
         }
 
         IsInitialized { tick } -> bool uses (store) {
+            with (store.bitmap) {
+                is_initialized(tick)
+            }
+        }
+    }
+}
+
+msg TickBitmapEchidnaTestMsg {
+    #[selector = sol("flipTick(int24)")]
+    FlipTick { tick: Int24 },
+
+    #[selector = sol(
+        "checkNextInitializedTickWithinOneWordInvariants(int24,bool)",
+    )]
+    CheckNextInitializedTickWithinOneWordInvariants { tick: Int24, lte: bool },
+}
+
+pub contract TickBitmapEchidnaTest {
+    mut store: TickBitmapStore,
+
+    recv TickBitmapEchidnaTestMsg {
+        FlipTick { tick } uses (mut store) {
+            let tick_i = tick.val as i256
+            let before = with (store.bitmap) {
+                is_initialized(tick_i)
+            }
+            with (store.bitmap) {
+                flip_tick(tick: tick_i, tick_spacing: 1)
+            }
+            let after = with (store.bitmap) {
+                is_initialized(tick_i)
+            }
+            assert(after == !before)
+        }
+
+        CheckNextInitializedTickWithinOneWordInvariants { tick, lte }
+        uses (store)
+        {
+            let tick_i = tick.val as i256
             let (next, initialized) = with (store.bitmap) {
-                next_initialized_tick_within_one_word(tick, tick_spacing: 1, lte: true)
+                next_initialized_tick_within_one_word(tick: tick_i, tick_spacing: 1, lte)
             }
 
-            next == tick && initialized
+            if lte {
+                assert(tick_i >= -8388352)
+                assert(next <= tick_i)
+                assert(tick_i - next < 256)
+
+                let mut i = tick_i
+                while i > next {
+                    assert(!with (store.bitmap) { is_initialized(i) })
+                    i = i - 1
+                }
+                assert(
+                    with (store.bitmap) { is_initialized(next) } == initialized,
+                )
+            } else {
+                assert(tick_i < 8388351)
+                assert(next > tick_i)
+                assert(next - tick_i <= 256)
+
+                let mut i = tick_i + 1
+                while i < next {
+                    assert(!with (store.bitmap) { is_initialized(i) })
+                    i = i + 1
+                }
+                assert(
+                    with (store.bitmap) { is_initialized(next) } == initialized,
+                )
+            }
         }
     }
 }
