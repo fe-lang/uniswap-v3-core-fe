@@ -318,7 +318,7 @@ fn call_modify_position(
 ) -> (u256, u256)
 uses (call: mut Call, evm: mut Evm)
 {
-    let ptr = std::evm::mem::alloc(132)
+    let ptr = 256
     evm.mstore(addr: ptr, value: (0x8f6f4f01 as u256) << 224)
     evm.mstore(addr: ptr + 4, value: owner.inner)
     evm.mstore(addr: ptr + 36, value: int24_abi_word(tick_lower))
