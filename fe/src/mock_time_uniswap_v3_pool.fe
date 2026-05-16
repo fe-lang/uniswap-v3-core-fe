@@ -121,13 +121,10 @@ msg MockTimeUniswapV3PoolMsg {
     } -> (u128, u128),
 
     #[selector = 0x8f6f4f01]
-    ModifyPosition {
-        owner: Address,
-        tickLower: Int24,
-        tickUpper: Int24,
-        amount: u128,
-        liquidityDelta: i128,
-    } -> (u256, u256),
+    ModifyPosition { owner: Address, tickLower: Int24, tickUpper: Int24, liquidityDelta: i128 } -> (
+        u256,
+        u256,
+    ),
 }
 
 struct MockTimePoolStore {
@@ -248,25 +245,23 @@ fn call_modify_position(
     owner: Address,
     tick_lower: i32,
     tick_upper: i32,
-    amount: u128,
     liquidity_delta: i128,
 ) -> (u256, u256)
 uses (call: mut Call, evm: mut Evm)
 {
-    let ptr = std::evm::mem::alloc(164)
+    let ptr = std::evm::mem::alloc(132)
     evm.mstore(addr: ptr, value: (0x8f6f4f01 as u256) << 224)
     evm.mstore(addr: ptr + 4, value: owner.inner)
     evm.mstore(addr: ptr + 36, value: int24_abi_word(tick_lower))
     evm.mstore(addr: ptr + 68, value: int24_abi_word(tick_upper))
-    evm.mstore(addr: ptr + 100, value: amount as u256)
-    evm.mstore(addr: ptr + 132, value: int_key(liquidity_delta as i256))
+    evm.mstore(addr: ptr + 100, value: int_key(liquidity_delta as i256))
     assert(
         call.raw_call(
             addr: pool,
             gas: evm.gas(),
             value: 0,
             args_offset: ptr,
-            args_len: 164,
+            args_len: 132,
         ),
     )
     evm.returndatacopy(dest: ptr, offset: 0, len: 64)
@@ -684,7 +679,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             )
         }
 
-        ModifyPosition { owner, tickLower, tickUpper, amount, liquidityDelta } -> (u256, u256)
+        ModifyPosition { owner, tickLower, tickUpper, liquidityDelta } -> (u256, u256)
         uses (ctx, mut evm, mut store)
         {
             assert(ctx.caller().inner == ctx.address().inner)
@@ -782,6 +777,11 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 }
             }
 
+            let amount: u128 = if liquidityDelta < 0 {
+                (0 - (liquidityDelta as i256)).downcast_unchecked()
+            } else {
+                liquidityDelta.downcast_unchecked()
+            }
             let round_up = liquidityDelta > 0
             let amount0 = if tick_current_i < tick_lower {
                 get_amount0_delta(
@@ -860,7 +860,6 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 owner: recipient,
                 tick_lower: tickLower.val,
                 tick_upper: tickUpper.val,
-                amount,
                 liquidity_delta,
             )
 
@@ -911,7 +910,6 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 owner: ctx.caller(),
                 tick_lower: tickLower.val,
                 tick_upper: tickUpper.val,
-                amount,
                 liquidity_delta,
             )
 
