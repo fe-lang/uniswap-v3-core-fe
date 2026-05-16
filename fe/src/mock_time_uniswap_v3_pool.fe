@@ -21,6 +21,7 @@ const TEST_POOL_START_TIME: u256 = 1601906400
 const TICKS_SLOT: u256 = 5
 const TICK_BITMAP_SLOT: u256 = 6
 const POSITIONS_SLOT: u256 = 7
+const MAX_U128_WORD: u256 = 0xffffffffffffffffffffffffffffffff
 const INITIALIZE_TOPIC: u256 = 0x98636036cb66a9c19a37435efc1e90142190214e8abeb821bdba3f2990dd4c95
 const INCREASE_OBSERVATION_CARDINALITY_NEXT_TOPIC: u256 = 0xac49e518f90a358f652e4400164f05a5d8f7e35e7747279bc3a93dbf584e125a
 const MINT_TOPIC: u256 = 0x7a53080ba414158be7ec69b987b5fb7d07dee101fe85488f0853ae16239d0bde
@@ -107,23 +108,14 @@ msg MockTimeUniswapV3PoolMsg {
     #[selector = sol("positions(bytes32)")]
     Positions { key: Bytes32 } -> (u128, u256, u256, u128, u128),
 
-    #[selector = sol("mint(address,int24,int24,uint128,bytes)")]
-    Mint { recipient: Address, tickLower: Int24, tickUpper: Int24, amount: u128, data: Bytes } -> (
-        u256,
-        u256,
-    ),
+    #[selector = 0x3c8a7d8d]
+    Mint,
 
-    #[selector = sol("burn(int24,int24,uint128)")]
-    Burn { tickLower: Int24, tickUpper: Int24, amount: u128 } -> (u256, u256),
+    #[selector = 0xa34123a7]
+    Burn,
 
-    #[selector = sol("collect(address,int24,int24,uint128,uint128)")]
-    Collect {
-        recipient: Address,
-        tickLower: Int24,
-        tickUpper: Int24,
-        amount0Requested: u128,
-        amount1Requested: u128,
-    } -> (u128, u128),
+    #[selector = 0x4f1eb3d8]
+    Collect,
 
     #[selector = 0x8f6f4f01]
     ModifyPosition { owner: Address, tickLower: Int24, tickUpper: Int24, liquidityDelta: i128 } -> (
@@ -198,6 +190,11 @@ fn current_seconds_per_liquidity(
 fn min_u128(_ a: u128, _ b: u128) -> u128 {
     if a < b { return a }
     b
+}
+
+fn decode_u128_word(_ word: u256) -> u128 {
+    assert(word <= MAX_U128_WORD)
+    word.downcast_unchecked()
 }
 
 #[arithmetic(unchecked)]
@@ -306,16 +303,18 @@ uses (call: mut Call, evm: mut Evm)
     (evm.mload(ptr), evm.mload(ptr + 32))
 }
 
-fn mint_callback(caller: Address, amount0: u256, amount1: u256, data: Bytes)
+fn mint_callback_calldata(caller: Address, amount0: u256, amount1: u256, data_start: u256)
 uses (call: mut Call, evm: mut Evm)
 {
-    let len = 100 + data.size
+    let data_len = evm.calldataload(data_start)
+    let data_size = 32 + (((data_len + 31) / 32) * 32)
+    let len = 100 + data_size
     let ptr = std::evm::mem::alloc(len)
     evm.mstore(addr: ptr, value: (0xd3487997 as u256) << 224)
     evm.mstore(addr: ptr + 4, value: amount0)
     evm.mstore(addr: ptr + 36, value: amount1)
     evm.mstore(addr: ptr + 68, value: 96)
-    copy_words(dest: ptr + 100, src: data.data, len: data.size)
+    evm.calldatacopy(dest: ptr + 100, offset: data_start, len: data_size)
     assert(
         call.raw_call(
             addr: caller,
@@ -447,6 +446,12 @@ uses (evm: mut Evm)
     evm.mstore(addr: 32, value: seconds_per_liquidity_inside_x128)
     evm.mstore(addr: 64, value: seconds_inside as u256)
     evm.return_data(offset: 0, len: 96)
+}
+
+fn return_pair(amount0: u256, amount1: u256) -> ! uses (evm: mut Evm) {
+    evm.mstore(addr: 0, value: amount0)
+    evm.mstore(addr: 32, value: amount1)
+    evm.return_data(offset: 0, len: 64)
 }
 
 pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
@@ -994,19 +999,22 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             (amount0, amount1)
         }
 
-        Mint { recipient, tickLower, tickUpper, amount, data } -> (u256, u256)
-        uses (ctx, mut call, mut evm, mut store)
-        {
+        Mint uses (ctx, mut call, mut evm, mut store) {
             check_unlocked(store.unlocked)
             store.unlocked = false
 
+            let recipient = Address { inner: evm.calldataload(4) }
+            let tick_lower = decode_int24_word(evm.calldataload(36)).downcast_unchecked()
+            let tick_upper = decode_int24_word(evm.calldataload(68)).downcast_unchecked()
+            let amount = decode_u128_word(evm.calldataload(100))
+            let data_start = 4 + evm.calldataload(132)
             assert(amount > 0)
             let liquidity_delta = to_int128(amount as i256)
             let (amount0, amount1) = call_modify_position(
                 pool: ctx.address(),
                 owner: recipient,
-                tick_lower: tickLower.val,
-                tick_upper: tickUpper.val,
+                tick_lower,
+                tick_upper,
                 liquidity_delta,
             )
 
@@ -1021,7 +1029,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 0
             }
 
-            mint_callback(caller: ctx.caller(), amount0, amount1, data)
+            mint_callback_calldata(caller: ctx.caller(), amount0, amount1, data_start)
 
             if amount0 > 0 {
                 let balance0_after: u256 = balance_of(token: store.token0, account: ctx.address())
@@ -1036,55 +1044,56 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             emit_mint(
                 sender: ctx.caller(),
                 owner: recipient,
-                tick_lower: tickLower.val,
-                tick_upper: tickUpper.val,
+                tick_lower,
+                tick_upper,
                 amount,
                 amount0,
                 amount1,
             )
-            (amount0, amount1)
+            return_pair(amount0, amount1)
         }
 
-        Burn { tickLower, tickUpper, amount } -> (u256, u256)
-        uses (ctx, mut call, mut evm, mut store)
-        {
+        Burn uses (ctx, mut call, mut evm, mut store) {
             assert_msg(store.unlocked, "LOK")
             store.unlocked = false
 
+            let tick_lower = decode_int24_word(evm.calldataload(4)).downcast_unchecked()
+            let tick_upper = decode_int24_word(evm.calldataload(36)).downcast_unchecked()
+            let amount = decode_u128_word(evm.calldataload(68))
             let liquidity_delta = 0 - to_int128(amount as i256)
             let (amount0, amount1) = call_modify_position(
                 pool: ctx.address(),
                 owner: ctx.caller(),
-                tick_lower: tickLower.val,
-                tick_upper: tickUpper.val,
+                tick_lower,
+                tick_upper,
                 liquidity_delta,
             )
 
             store.unlocked = true
             emit_burn(
                 owner: ctx.caller(),
-                tick_lower: tickLower.val,
-                tick_upper: tickUpper.val,
+                tick_lower,
+                tick_upper,
                 amount,
                 amount0,
                 amount1,
             )
-            (amount0, amount1)
+            return_pair(amount0, amount1)
         }
 
-        Collect { recipient, tickLower, tickUpper, amount0Requested, amount1Requested } -> (
-            u128,
-            u128,
-        )
-        uses (ctx, mut evm, mut store)
-        {
+        Collect uses (ctx, mut evm, mut store) {
             check_unlocked(store.unlocked)
             store.unlocked = false
 
+            let recipient = Address { inner: evm.calldataload(4) }
+            let tick_lower = decode_int24_word(evm.calldataload(36))
+            let tick_upper = decode_int24_word(evm.calldataload(68))
+            let amount0_requested = decode_u128_word(evm.calldataload(100))
+            let amount1_requested = decode_u128_word(evm.calldataload(132))
             let position_slot = position::position_slot(
                 owner: ctx.caller(),
-                tick_lower: tickLower.val as i256,
-                tick_upper: tickUpper.val as i256,
+                tick_lower,
+                tick_upper,
                 positions_slot: POSITIONS_SLOT,
             )
             let (
@@ -1094,8 +1103,8 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 tokens_owed0,
                 tokens_owed1,
             ) = position::read_position(position_slot)
-            let amount0 = min_u128(a: amount0Requested, b: tokens_owed0)
-            let amount1 = min_u128(a: amount1Requested, b: tokens_owed1)
+            let amount0 = min_u128(a: amount0_requested, b: tokens_owed0)
+            let amount1 = min_u128(a: amount1_requested, b: tokens_owed1)
 
             if amount0 > 0 || amount1 > 0 {
                 position::set_position(
@@ -1122,10 +1131,10 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 len: 96,
                 topic0: COLLECT_TOPIC,
                 topic1: ctx.caller().inner,
-                topic2: int24_abi_word(tickLower.val),
-                topic3: int24_abi_word(tickUpper.val),
+                topic2: int24_abi_word(tick_lower.downcast_unchecked()),
+                topic3: int24_abi_word(tick_upper.downcast_unchecked()),
             )
-            (amount0, amount1)
+            return_pair(amount0: amount0 as u256, amount1: amount1 as u256)
         }
     }
 }
