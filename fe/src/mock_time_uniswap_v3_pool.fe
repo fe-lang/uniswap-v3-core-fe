@@ -75,6 +75,9 @@ msg MockTimeUniswapV3PoolMsg {
     #[selector = sol("liquidity()")]
     Liquidity -> u128,
 
+    #[selector = sol("protocolFees()")]
+    ProtocolFees -> (u128, u128),
+
     #[selector = 0xa38807f2]
     SnapshotCumulativesInside,
 
@@ -501,6 +504,10 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
 
         Liquidity -> u128 uses (store) {
             store.liquidity
+        }
+
+        ProtocolFees -> (u128, u128) {
+            (0, 0)
         }
 
         SnapshotCumulativesInside uses (mut evm, store) {

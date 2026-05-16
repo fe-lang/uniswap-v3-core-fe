@@ -1066,6 +1066,12 @@ describe('UniswapV3Pool', () => {
       expect((await pool.slot0()).feeProtocol).to.eq(0)
     })
 
+    it('protocol fees are initially zero', async () => {
+      const { token0: token0ProtocolFees, token1: token1ProtocolFees } = await pool.protocolFees()
+      expect(token0ProtocolFees).to.eq(0)
+      expect(token1ProtocolFees).to.eq(0)
+    })
+
     it('can be changed by the owner', async () => {
       await pool.setFeeProtocol(6, 6)
       expect((await pool.slot0()).feeProtocol).to.eq(102)

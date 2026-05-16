@@ -729,6 +729,16 @@ const abiOverrides = {
     },
     {
       type: 'function',
+      name: 'protocolFees',
+      inputs: [],
+      outputs: [
+        { name: 'token0', type: 'uint128' },
+        { name: 'token1', type: 'uint128' },
+      ],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
       name: 'snapshotCumulativesInside',
       inputs: [
         { name: 'tickLower', type: 'int24' },
