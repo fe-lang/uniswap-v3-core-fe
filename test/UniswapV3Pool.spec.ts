@@ -958,6 +958,22 @@ describe('UniswapV3Pool', () => {
         .withArgs(wallet.address, other.address, minTick, maxTick, amount0, amount1)
     })
 
+    it('transfers collected burned amounts to the recipient', async () => {
+      const liquidityAmount = expandTo18Decimals(1)
+      await mint(wallet.address, minTick, maxTick, liquidityAmount)
+
+      const { amount0, amount1 } = await pool.callStatic.burn(minTick, maxTick, liquidityAmount)
+      await pool.burn(minTick, maxTick, liquidityAmount)
+
+      const balance0Before = await token0.balanceOf(other.address)
+      const balance1Before = await token1.balanceOf(other.address)
+
+      await pool.collect(other.address, minTick, maxTick, MaxUint128, MaxUint128)
+
+      expect(await token0.balanceOf(other.address)).to.eq(balance0Before.add(amount0))
+      expect(await token1.balanceOf(other.address)).to.eq(balance1Before.add(amount1))
+    })
+
     it('works with multiple LPs', async () => {
       await mint(wallet.address, minTick, maxTick, expandTo18Decimals(1))
       await mint(wallet.address, minTick + tickSpacing, maxTick - tickSpacing, expandTo18Decimals(2))
