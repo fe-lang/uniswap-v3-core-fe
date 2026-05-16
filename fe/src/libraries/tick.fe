@@ -11,6 +11,16 @@ const MAX_U32: u256 = 0xffffffff
 const MASK_U56: u256 = 0xffffffffffffff
 const MASK_U128: u256 = 0xffffffffffffffffffffffffffffffff
 const MASK_U160: u256 = 0xffffffffffffffffffffffffffffffffffffffff
+const OVERFLOW_MIN_TICK: i256 = -16
+const OVERFLOW_MAX_TICK: i256 = 16
+const OVERFLOW_MAX_LIQUIDITY: u128 = 0x7ffffffffffffffffffffffffffffff
+const OVERFLOW_TICK_SLOT: u256 = 1
+const OVERFLOW_TOTAL_LIQUIDITY_SLOT: u256 = 2
+const OVERFLOW_FEE_GROWTH_GLOBAL0_SLOT: u256 = 3
+const OVERFLOW_FEE_GROWTH_GLOBAL1_SLOT: u256 = 4
+const OVERFLOW_TOTAL_GROWTH0_SLOT: u256 = 5
+const OVERFLOW_TOTAL_GROWTH1_SLOT: u256 = 6
+const U256_HALF_MAX: u256 = 0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
 
 fn mapping_slot_at(_ tick: i256, ticks_slot: u256) -> u256 uses (evm: mut Evm) {
     let ptr = mem::alloc(0)
@@ -195,6 +205,72 @@ fn initialized(_ tick: i256) -> bool uses (evm: mut Evm) {
 
 fn initialized_at(_ tick: i256, ticks_slot: u256) -> bool uses (evm: mut Evm) {
     ((slot3_at(tick, ticks_slot: ticks_slot) >> 248) & 0xff) != 0
+}
+
+fn overflow_current_tick() -> i256 uses (evm: mut Evm) {
+    decode_signed(evm.sload(OVERFLOW_TICK_SLOT), bits: 24)
+}
+
+fn set_overflow_current_tick(_ tick: i256) uses (evm: mut Evm) {
+    evm.sstore(
+        slot: OVERFLOW_TICK_SLOT,
+        value: signed_word(tick, bits: 24),
+    )
+}
+
+fn overflow_total_liquidity() -> i256 uses (evm: mut Evm) {
+    evm.sload(OVERFLOW_TOTAL_LIQUIDITY_SLOT).downcast_unchecked()
+}
+
+fn set_overflow_total_liquidity(_ liquidity: i256) uses (evm: mut Evm) {
+    evm.sstore(
+        slot: OVERFLOW_TOTAL_LIQUIDITY_SLOT,
+        value: int_key(liquidity),
+    )
+}
+
+fn overflow_fee_growth_global0_x128() -> u256 uses (evm: mut Evm) {
+    evm.sload(OVERFLOW_FEE_GROWTH_GLOBAL0_SLOT)
+}
+
+fn overflow_fee_growth_global1_x128() -> u256 uses (evm: mut Evm) {
+    evm.sload(OVERFLOW_FEE_GROWTH_GLOBAL1_SLOT)
+}
+
+fn overflow_total_growth0() -> u256 uses (evm: mut Evm) {
+    evm.sload(OVERFLOW_TOTAL_GROWTH0_SLOT)
+}
+
+fn overflow_total_growth1() -> u256 uses (evm: mut Evm) {
+    evm.sload(OVERFLOW_TOTAL_GROWTH1_SLOT)
+}
+
+#[arithmetic(unchecked)]
+fn increase_overflow_fee_growth_global0_x128(amount: u256) uses (evm: mut Evm) {
+    let total_growth = overflow_total_growth0()
+    assert(total_growth + amount > total_growth)
+    evm.sstore(
+        slot: OVERFLOW_FEE_GROWTH_GLOBAL0_SLOT,
+        value: overflow_fee_growth_global0_x128() + amount,
+    )
+    evm.sstore(
+        slot: OVERFLOW_TOTAL_GROWTH0_SLOT,
+        value: total_growth + amount,
+    )
+}
+
+#[arithmetic(unchecked)]
+fn increase_overflow_fee_growth_global1_x128(amount: u256) uses (evm: mut Evm) {
+    let total_growth = overflow_total_growth1()
+    assert(total_growth + amount > total_growth)
+    evm.sstore(
+        slot: OVERFLOW_FEE_GROWTH_GLOBAL1_SLOT,
+        value: overflow_fee_growth_global1_x128() + amount,
+    )
+    evm.sstore(
+        slot: OVERFLOW_TOTAL_GROWTH1_SLOT,
+        value: total_growth + amount,
+    )
 }
 
 #[arithmetic(unchecked)]
@@ -666,6 +742,150 @@ pub contract TickEchidnaTest {
 
             let num_ticks: u256 = ((max_tick - min_tick) / spacing + 1).downcast_unchecked()
             assert((max_liquidity_per_tick as u256) * num_ticks <= MAX_U128)
+        }
+    }
+}
+
+msg TickOverflowSafetyEchidnaTestMsg {
+    #[selector = sol("increaseFeeGrowthGlobal0X128(uint256)")]
+    IncreaseFeeGrowthGlobal0X128 { amount: u256 },
+
+    #[selector = sol("increaseFeeGrowthGlobal1X128(uint256)")]
+    IncreaseFeeGrowthGlobal1X128 { amount: u256 },
+
+    #[selector = sol("setPosition(int24,int24,int128)")]
+    SetPosition { tickLower: Int24, tickUpper: Int24, liquidityDelta: i128 },
+
+    #[selector = sol("moveToTick(int24)")]
+    MoveToTick { target: Int24 },
+}
+
+pub contract TickOverflowSafetyEchidnaTest uses (evm: mut Evm) {
+    init()
+    uses (mut evm)
+    {
+        evm.sstore(
+            slot: OVERFLOW_FEE_GROWTH_GLOBAL0_SLOT,
+            value: U256_HALF_MAX,
+        )
+        evm.sstore(
+            slot: OVERFLOW_FEE_GROWTH_GLOBAL1_SLOT,
+            value: U256_HALF_MAX,
+        )
+    }
+
+    recv TickOverflowSafetyEchidnaTestMsg {
+        IncreaseFeeGrowthGlobal0X128 { amount } uses (mut evm) {
+            increase_overflow_fee_growth_global0_x128(amount)
+        }
+
+        IncreaseFeeGrowthGlobal1X128 { amount } uses (mut evm) {
+            increase_overflow_fee_growth_global1_x128(amount)
+        }
+
+        SetPosition { tickLower, tickUpper, liquidityDelta }
+        uses (mut evm)
+        {
+            let lower = tickLower.val as i256
+            let upper = tickUpper.val as i256
+            assert(lower > OVERFLOW_MIN_TICK)
+            assert(upper < OVERFLOW_MAX_TICK)
+            assert(lower < upper)
+
+            let current_tick = overflow_current_tick()
+            let flipped_lower = update(
+                tick: lower,
+                tick_current: current_tick,
+                liquidity_delta: liquidityDelta,
+                fee_growth_global0_x128: overflow_fee_growth_global0_x128(),
+                fee_growth_global1_x128: overflow_fee_growth_global1_x128(),
+                seconds_per_liquidity_cumulative_x128: 0,
+                tick_cumulative: 0,
+                time: evm.timestamp().downcast_unchecked(),
+                upper: false,
+                max_liquidity: OVERFLOW_MAX_LIQUIDITY,
+            )
+            let flipped_upper = update(
+                tick: upper,
+                tick_current: current_tick,
+                liquidity_delta: liquidityDelta,
+                fee_growth_global0_x128: overflow_fee_growth_global0_x128(),
+                fee_growth_global1_x128: overflow_fee_growth_global1_x128(),
+                seconds_per_liquidity_cumulative_x128: 0,
+                tick_cumulative: 0,
+                time: evm.timestamp().downcast_unchecked(),
+                upper: true,
+                max_liquidity: OVERFLOW_MAX_LIQUIDITY,
+            )
+
+            if flipped_lower {
+                let (liquidity_gross_value, _, _, _, _, _, _, _) = read_tick(lower)
+                if liquidityDelta < 0 {
+                    assert(liquidity_gross_value == 0)
+                    clear(tick: lower)
+                } else {
+                    assert(liquidity_gross_value > 0)
+                }
+            }
+
+            if flipped_upper {
+                let (liquidity_gross_value, _, _, _, _, _, _, _) = read_tick(upper)
+                if liquidityDelta < 0 {
+                    assert(liquidity_gross_value == 0)
+                    clear(tick: upper)
+                } else {
+                    assert(liquidity_gross_value > 0)
+                }
+            }
+
+            let total_liquidity = overflow_total_liquidity() + liquidityDelta as i256
+            set_overflow_total_liquidity(total_liquidity)
+            assert(total_liquidity >= 0)
+
+            if total_liquidity == 0 {
+                evm.sstore(slot: OVERFLOW_TOTAL_GROWTH0_SLOT, value: 0)
+                evm.sstore(slot: OVERFLOW_TOTAL_GROWTH1_SLOT, value: 0)
+            }
+        }
+
+        MoveToTick { target } uses (mut evm) {
+            let target_tick = target.val as i256
+            assert(target_tick > OVERFLOW_MIN_TICK)
+            assert(target_tick < OVERFLOW_MAX_TICK)
+
+            let mut current_tick = overflow_current_tick()
+            while current_tick != target_tick {
+                if current_tick < target_tick {
+                    let next_tick = current_tick + 1
+                    let (liquidity_gross_value, _, _, _, _, _, _, _) = read_tick(next_tick)
+                    if liquidity_gross_value > 0 {
+                        cross(
+                            tick: next_tick,
+                            fee_growth_global0_x128: overflow_fee_growth_global0_x128(),
+                            fee_growth_global1_x128: overflow_fee_growth_global1_x128(),
+                            seconds_per_liquidity_cumulative_x128: 0,
+                            tick_cumulative: 0,
+                            time: evm.timestamp().downcast_unchecked(),
+                        )
+                    }
+                    current_tick = next_tick
+                } else {
+                    let (liquidity_gross_value, _, _, _, _, _, _, _) = read_tick(current_tick)
+                    if liquidity_gross_value > 0 {
+                        cross(
+                            tick: current_tick,
+                            fee_growth_global0_x128: overflow_fee_growth_global0_x128(),
+                            fee_growth_global1_x128: overflow_fee_growth_global1_x128(),
+                            seconds_per_liquidity_cumulative_x128: 0,
+                            tick_cumulative: 0,
+                            time: evm.timestamp().downcast_unchecked(),
+                        )
+                    }
+                    current_tick = current_tick - 1
+                }
+            }
+
+            set_overflow_current_tick(current_tick)
         }
     }
 }
