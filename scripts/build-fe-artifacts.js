@@ -976,6 +976,22 @@ const abiOverrides = {
     },
     {
       type: 'function',
+      name: 'swap',
+      inputs: [
+        { name: 'recipient', type: 'address' },
+        { name: 'zeroForOne', type: 'bool' },
+        { name: 'amountSpecified', type: 'int256' },
+        { name: 'sqrtPriceLimitX96', type: 'uint160' },
+        { name: 'data', type: 'bytes' },
+      ],
+      outputs: [
+        { name: 'amount0', type: 'int256' },
+        { name: 'amount1', type: 'int256' },
+      ],
+      stateMutability: 'nonpayable',
+    },
+    {
+      type: 'function',
       name: 'observe',
       inputs: [{ name: 'secondsAgos', type: 'uint32[]' }],
       outputs: [

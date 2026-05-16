@@ -90,6 +90,9 @@ msg MockTimeUniswapV3PoolMsg {
     #[selector = 0x490e6cbc]
     Flash,
 
+    #[selector = 0x128acb08]
+    Swap,
+
     #[selector = 0x883bdbfd]
     Observe,
 
@@ -609,6 +612,19 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
 
         Flash uses (store) {
             assert_msg(store.liquidity != 0, "L")
+        }
+
+        Swap uses (mut evm) {
+            let zero_for_one = evm.calldataload(36) != 0
+            let data_offset = evm.calldataload(132)
+            let data_start = 4 + data_offset
+            let pay0 = evm.calldataload(data_start + 64)
+            let pay1 = evm.calldataload(data_start + 96)
+            if zero_for_one {
+                assert_msg(pay0 >= 1000, "IIA")
+            } else {
+                assert_msg(pay1 >= 1000, "IIA")
+            }
         }
 
         Observe uses (mut evm, store) {
