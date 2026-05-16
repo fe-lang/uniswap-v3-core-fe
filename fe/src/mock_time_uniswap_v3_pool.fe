@@ -48,8 +48,8 @@ msg MockTimeUniswapV3PoolMsg {
     #[selector = sol("slot0()")]
     Slot0 -> (u256, i32, u16, u16, u16, u8, bool),
 
-    #[selector = sol("observations(uint256)")]
-    Observations { index: u256 } -> (u32, i64, u256, bool),
+    #[selector = 0x252c09d7]
+    Observations -> (u32, i64, u256, bool),
 
     #[selector = sol("initialize(uint160)")]
     Initialize { sqrtPriceX96: Uint160 },
@@ -75,8 +75,8 @@ msg MockTimeUniswapV3PoolMsg {
     #[selector = sol("liquidity()")]
     Liquidity -> u128,
 
-    #[selector = sol("setFeeProtocol(uint8,uint8)")]
-    SetFeeProtocol { feeProtocol0: u8, feeProtocol1: u8 },
+    #[selector = 0x8206a4d1]
+    SetFeeProtocol,
 
     #[selector = 0x85b66729]
     CollectProtocol -> (u256, u256),
@@ -394,9 +394,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             )
         }
 
-        Observations { index } -> (u32, i64, u256, bool)
-        uses (store)
-        {
+        Observations -> (u32, i64, u256, bool) uses (store) {
             (
                 store.observation0_block_timestamp,
                 store.observation0_tick_cumulative,
@@ -467,9 +465,14 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             store.liquidity
         }
 
-        SetFeeProtocol { feeProtocol0, feeProtocol1 }
-        uses (ctx, mut call, mut evm, mut store)
-        {
+        SetFeeProtocol uses (ctx, mut call, mut evm, mut store) {
+            assert(evm.calldatasize() >= 68)
+            let fee0_word = evm.calldataload(4)
+            let fee1_word = evm.calldataload(36)
+            assert(fee0_word <= 255)
+            assert(fee1_word <= 255)
+            let feeProtocol0: u8 = fee0_word.downcast_unchecked()
+            let feeProtocol1: u8 = fee1_word.downcast_unchecked()
             assert(
                 ctx.caller().inner == factory_owner(factory: store.factory),
             )
