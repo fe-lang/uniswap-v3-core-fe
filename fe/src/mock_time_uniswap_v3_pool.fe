@@ -28,6 +28,7 @@ const BURN_TOPIC: u256 = 0x0c396cd989a39f4459b5fa1aed6a9a8dcdbc45908acfd67e028cd
 const COLLECT_TOPIC: u256 = 0x70935338e69775456a85ddef226c395fb668b63fa0115f5f20610b388e6ca9c0
 const SET_FEE_PROTOCOL_TOPIC: u256 = 0x973d8d92bb299f4af6ce49b52a8adb85ae46b9f214c4c4fc06ac77401237b133
 const FLASH_TOPIC: u256 = 0xbdbdb71d7860376ba52b25a5028beea23581364a40522f6bcfb86bb1f2dca633
+const FLASH_CALLBACK_SELECTOR: u256 = 0xe9cbafb0
 
 msg MockTimeUniswapV3PoolMsg {
     #[selector = sol("factory()")]
@@ -282,6 +283,35 @@ uses (call: mut Call, evm: mut Evm)
         evm.mstore(addr: ptr + 100, value: 0)
     } else {
         copy_words(dest: ptr + 100, src: data.data, len: data.size)
+    }
+    assert(
+        call.raw_call(
+            addr: caller,
+            gas: 1000000,
+            value: 0,
+            args_offset: ptr,
+            args_len: len,
+        ),
+    )
+}
+
+fn flash_callback(caller: Address, fee0: u256, fee1: u256, data_start: u256, data_len: u256)
+uses (call: mut Call, evm: mut Evm)
+{
+    let padded_data_len = ((data_len + 31) / 32) * 32
+    let len = 132 + padded_data_len
+    let ptr = std::evm::mem::alloc(len)
+    evm.mstore(addr: ptr, value: FLASH_CALLBACK_SELECTOR << 224)
+    evm.mstore(addr: ptr + 4, value: fee0)
+    evm.mstore(addr: ptr + 36, value: fee1)
+    evm.mstore(addr: ptr + 68, value: 96)
+    evm.mstore(addr: ptr + 100, value: data_len)
+    if padded_data_len > 0 {
+        evm.calldatacopy(
+            dest: ptr + 132,
+            offset: data_start + 32,
+            len: padded_data_len,
+        )
     }
     assert(
         call.raw_call(
@@ -630,6 +660,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             let amount1 = evm.calldataload(68)
             let data_offset = evm.calldataload(100)
             let data_start = 4 + data_offset
+            let data_len = evm.calldataload(data_start)
             let pay0 = evm.calldataload(data_start + 64)
             let pay1 = evm.calldataload(data_start + 96)
             let fee0 = ((amount0 * (store.fee as u256)) + 999999) / 1000000
@@ -642,6 +673,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 assert(pay1 >= amount1 + fee1)
                 safe_transfer(token: store.token1, to: recipient, value: amount1)
             }
+            flash_callback(caller: ctx.caller(), fee0, fee1, data_start, data_len)
             emit_flash(
                 sender: ctx.caller(),
                 recipient,
