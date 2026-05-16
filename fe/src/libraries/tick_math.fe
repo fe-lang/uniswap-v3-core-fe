@@ -1,3 +1,4 @@
+use std::abi::sol::{self, Int24, Uint160}
 use std::evm::Evm
 
 pub const MIN_TICK: i256 = -887272
@@ -193,6 +194,39 @@ pub contract TickMathTest uses (evm: Evm) {
 
         MaxSqrtRatio -> u256 {
             max_sqrt_ratio()
+        }
+    }
+}
+
+msg TickMathEchidnaTestMsg {
+    #[selector = sol("checkGetSqrtRatioAtTickInvariants(int24)")]
+    CheckGetSqrtRatioAtTickInvariants { tick: Int24 },
+
+    #[selector = sol("checkGetTickAtSqrtRatioInvariants(uint160)")]
+    CheckGetTickAtSqrtRatioInvariants { ratio: Uint160 },
+}
+
+pub contract TickMathEchidnaTest {
+    recv TickMathEchidnaTestMsg {
+        CheckGetSqrtRatioAtTickInvariants { tick } {
+            let tick_i = tick.val as i256
+            let ratio = get_sqrt_ratio_at_tick(tick: tick_i)
+            assert(
+                get_sqrt_ratio_at_tick(tick: tick_i - 1) < ratio
+                    && ratio < get_sqrt_ratio_at_tick(tick: tick_i + 1),
+            )
+            assert(ratio >= MIN_SQRT_RATIO)
+            assert(ratio <= MAX_SQRT_RATIO)
+        }
+
+        CheckGetTickAtSqrtRatioInvariants { ratio } {
+            let tick = get_tick_at_sqrt_ratio(sqrt_price_x96: ratio.val)
+            assert(
+                ratio.val >= get_sqrt_ratio_at_tick(tick)
+                    && ratio.val < get_sqrt_ratio_at_tick(tick: tick + 1),
+            )
+            assert(tick >= MIN_TICK)
+            assert(tick < MAX_TICK)
         }
     }
 }
