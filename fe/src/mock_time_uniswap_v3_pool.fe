@@ -213,34 +213,32 @@ fn copy_words(dest: u256, src: u256, len: u256) uses (evm: mut Evm) {
 fn balance_of(token: Address, account: Address) -> u256
 uses (call: mut Call, evm: mut Evm)
 {
-    let ptr = std::evm::mem::alloc(36)
-    evm.mstore(addr: ptr, value: (0x70a08231 as u256) << 224)
-    evm.mstore(addr: ptr + 4, value: account.inner)
+    evm.mstore(addr: 0, value: (0x70a08231 as u256) << 224)
+    evm.mstore(addr: 4, value: account.inner)
     assert(
         call.raw_call(
             addr: token,
             gas: 1000000,
             value: 0,
-            args_offset: ptr,
+            args_offset: 0,
             args_len: 36,
         ),
     )
-    evm.returndatacopy(dest: ptr, offset: 0, len: 32)
-    evm.mload(ptr)
+    evm.returndatacopy(dest: 0, offset: 0, len: 32)
+    evm.mload(0)
 }
 
 fn factory_owner(factory: Address) -> u256 uses (call: mut Call, evm: mut Evm) {
-    let ptr = std::evm::mem::alloc(4)
-    evm.mstore(addr: ptr, value: (0x8da5cb5b as u256) << 224)
+    evm.mstore(addr: 0, value: (0x8da5cb5b as u256) << 224)
     call.raw_call(
         addr: factory,
         gas: evm.gas(),
         value: 0,
-        args_offset: ptr,
+        args_offset: 0,
         args_len: 4,
     )
-    evm.returndatacopy(dest: ptr, offset: 0, len: 32)
-    evm.mload(ptr)
+    evm.returndatacopy(dest: 0, offset: 0, len: 32)
+    evm.mload(0)
 }
 
 fn call_modify_position(
@@ -678,17 +676,13 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 time_delta,
                 liquidity: store.liquidity,
             )
-            let out = std::evm::mem::alloc(192)
-            evm.mstore(addr: out, value: 64)
-            evm.mstore(addr: out + 32, value: 128)
-            evm.mstore(addr: out + 64, value: 1)
-            evm.mstore(addr: out + 96, value: int_key(tick_cumulative))
-            evm.mstore(addr: out + 128, value: 1)
-            evm.mstore(
-                addr: out + 160,
-                value: seconds_per_liquidity_cumulative_x128,
-            )
-            evm.return_data(offset: out, len: 192)
+            evm.mstore(addr: 0, value: 64)
+            evm.mstore(addr: 32, value: 128)
+            evm.mstore(addr: 64, value: 1)
+            evm.mstore(addr: 96, value: int_key(tick_cumulative))
+            evm.mstore(addr: 128, value: 1)
+            evm.mstore(addr: 160, value: seconds_per_liquidity_cumulative_x128)
+            evm.return_data(offset: 0, len: 192)
         }
 
         Ticks { tick } -> (u128, i128, u256, u256, i64, u256, u32, bool)
