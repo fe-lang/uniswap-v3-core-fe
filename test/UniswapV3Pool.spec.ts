@@ -638,13 +638,17 @@ describe('UniswapV3Pool', () => {
     it('current tick accumulator increases by tick over time', async () => {
       let {
         tickCumulatives: [tickCumulative],
+        secondsPerLiquidityCumulativeX128s: [secondsPerLiquidityCumulativeX128],
       } = await pool.observe([0])
       expect(tickCumulative).to.eq(0)
+      expect(secondsPerLiquidityCumulativeX128).to.eq(0)
       await pool.advanceTime(10)
       ;({
         tickCumulatives: [tickCumulative],
+        secondsPerLiquidityCumulativeX128s: [secondsPerLiquidityCumulativeX128],
       } = await pool.observe([0]))
       expect(tickCumulative).to.eq(0)
+      expect(secondsPerLiquidityCumulativeX128).to.eq(BigNumber.from(10).shl(128).div(initializeLiquidityAmount))
     })
 
     it('current tick accumulator after single swap', async () => {

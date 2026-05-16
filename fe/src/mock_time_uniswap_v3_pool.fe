@@ -616,13 +616,22 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             let time_delta = current_time - store.observation0_block_timestamp
             let tick_cumulative = (store.observation0_tick_cumulative as i256)
                 + ((store.tick as i256) * (time_delta as i256))
+            let seconds_per_liquidity_cumulative_x128 = current_seconds_per_liquidity(
+                seconds_per_liquidity_cumulative_x128: store
+                    .observation0_seconds_per_liquidity_cumulative_x128,
+                time_delta,
+                liquidity: store.liquidity,
+            )
             let out = std::evm::mem::alloc(192)
             evm.mstore(addr: out, value: 64)
             evm.mstore(addr: out + 32, value: 128)
             evm.mstore(addr: out + 64, value: 1)
             evm.mstore(addr: out + 96, value: int_key(tick_cumulative))
             evm.mstore(addr: out + 128, value: 1)
-            evm.mstore(addr: out + 160, value: 0)
+            evm.mstore(
+                addr: out + 160,
+                value: seconds_per_liquidity_cumulative_x128,
+            )
             evm.return_data(offset: out, len: 192)
         }
 
