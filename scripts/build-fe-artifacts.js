@@ -6,7 +6,7 @@ const repoRoot = path.resolve(__dirname, '..')
 const feRoot = path.join(repoRoot, 'fe')
 const feOutDir = path.join(feRoot, 'out')
 const hardhatOutDir = path.join(feRoot, 'hardhat-artifacts')
-const feBin = process.env.FE_BIN || '/Users/sean/code/fe/pr-review/target/release/fe'
+const feBin = process.env.FE_BIN || '/Users/sean/code/fe/uni-v3-compiler-v3/target/release/fe'
 const contracts = process.argv.slice(2)
 
 const tickInfoComponents = [
