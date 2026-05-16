@@ -103,11 +103,11 @@ msg MockTimeUniswapV3PoolMsg {
     #[selector = 0x883bdbfd]
     Observe,
 
-    #[selector = sol("ticks(int24)")]
-    Ticks { tick: Int24 } -> (u128, i128, u256, u256, i64, u256, u32, bool),
+    #[selector = 0xf30dba93]
+    Ticks,
 
-    #[selector = sol("positions(bytes32)")]
-    Positions { key: Bytes32 } -> (u128, u256, u256, u128, u128),
+    #[selector = 0x514ea4bf]
+    Positions,
 
     #[selector = 0x3c8a7d8d]
     Mint,
@@ -461,6 +461,46 @@ fn return_pair(amount0: u256, amount1: u256) -> ! uses (evm: mut Evm) {
     evm.mstore(addr: 0, value: amount0)
     evm.mstore(addr: 32, value: amount1)
     evm.return_data(offset: 0, len: 64)
+}
+
+fn return_tick_info(
+    liquidity_gross: u128,
+    liquidity_net: i128,
+    fee_growth_outside0_x128: u256,
+    fee_growth_outside1_x128: u256,
+    tick_cumulative_outside: i256,
+    seconds_per_liquidity_outside_x128: u256,
+    seconds_outside: u32,
+    initialized: bool,
+) -> !
+uses (evm: mut Evm)
+{
+    evm.mstore(addr: 0, value: liquidity_gross as u256)
+    evm.mstore(addr: 32, value: int_key(liquidity_net as i256))
+    evm.mstore(addr: 64, value: fee_growth_outside0_x128)
+    evm.mstore(addr: 96, value: fee_growth_outside1_x128)
+    evm.mstore(addr: 128, value: int_key(tick_cumulative_outside))
+    evm.mstore(addr: 160, value: seconds_per_liquidity_outside_x128)
+    evm.mstore(addr: 192, value: seconds_outside as u256)
+    evm.mstore(addr: 224, value: if initialized { 1 } else { 0 })
+    evm.return_data(offset: 0, len: 256)
+}
+
+fn return_position_info(
+    liquidity_value: u128,
+    fee_growth_inside0_last_x128: u256,
+    fee_growth_inside1_last_x128: u256,
+    tokens_owed0: u128,
+    tokens_owed1: u128,
+) -> !
+uses (evm: mut Evm)
+{
+    evm.mstore(addr: 0, value: liquidity_value as u256)
+    evm.mstore(addr: 32, value: fee_growth_inside0_last_x128)
+    evm.mstore(addr: 64, value: fee_growth_inside1_last_x128)
+    evm.mstore(addr: 96, value: tokens_owed0 as u256)
+    evm.mstore(addr: 128, value: tokens_owed1 as u256)
+    evm.return_data(offset: 0, len: 160)
 }
 
 pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
@@ -841,9 +881,8 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             evm.return_data(offset: 0, len: 192)
         }
 
-        Ticks { tick } -> (u128, i128, u256, u256, i64, u256, u32, bool)
-        uses (mut evm)
-        {
+        Ticks uses (mut evm) {
+            let tick = decode_int24_word(evm.calldataload(4))
             let (
                 liquidity_gross,
                 liquidity_net,
@@ -853,24 +892,35 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 seconds_per_liquidity_outside_x128,
                 seconds_outside,
                 initialized,
-            ) = tick::read_tick_at(tick.val as i256, ticks_slot: TICKS_SLOT)
-            (
+            ) = tick::read_tick_at(tick, ticks_slot: TICKS_SLOT)
+            return_tick_info(
                 liquidity_gross,
                 liquidity_net,
                 fee_growth_outside0_x128,
                 fee_growth_outside1_x128,
-                tick_cumulative_outside.downcast_unchecked(),
+                tick_cumulative_outside,
                 seconds_per_liquidity_outside_x128,
                 seconds_outside,
                 initialized,
             )
         }
 
-        Positions { key } -> (u128, u256, u256, u128, u128)
-        uses (mut evm)
-        {
-            position::read_position(
-                position::mapping_slot(key: key.val, positions_slot: POSITIONS_SLOT),
+        Positions uses (mut evm) {
+            let (
+                liquidity_value,
+                fee_growth_inside0_last_x128,
+                fee_growth_inside1_last_x128,
+                tokens_owed0,
+                tokens_owed1,
+            ) = position::read_position(
+                position::mapping_slot(key: evm.calldataload(4), positions_slot: POSITIONS_SLOT),
+            )
+            return_position_info(
+                liquidity_value,
+                fee_growth_inside0_last_x128,
+                fee_growth_inside1_last_x128,
+                tokens_owed0,
+                tokens_owed1,
             )
         }
 
