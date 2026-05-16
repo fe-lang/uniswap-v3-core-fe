@@ -119,10 +119,7 @@ msg MockTimeUniswapV3PoolMsg {
     Collect,
 
     #[selector = 0x8f6f4f01]
-    ModifyPosition { owner: Address, tickLower: Int24, tickUpper: Int24, liquidityDelta: i128 } -> (
-        u256,
-        u256,
-    ),
+    ModifyPosition,
 }
 
 struct MockTimePoolStore {
@@ -196,6 +193,17 @@ fn min_u128(_ a: u128, _ b: u128) -> u128 {
 fn decode_u128_word(_ word: u256) -> u128 {
     assert(word <= MAX_U128_WORD)
     word.downcast_unchecked()
+}
+
+fn decode_i128_word(_ word: u256) -> i128 {
+    let value = word & MAX_U128_WORD
+    if (value & 0x80000000000000000000000000000000) == 0 {
+        return value.downcast_unchecked()
+    }
+
+    let magnitude = ((MAX_U128_WORD - value) + 1) & MAX_U128_WORD
+    let magnitude_i: i256 = magnitude.downcast_unchecked()
+    (0 - magnitude_i).downcast_unchecked()
 }
 
 #[arithmetic(unchecked)]
@@ -866,12 +874,12 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             )
         }
 
-        ModifyPosition { owner, tickLower, tickUpper, liquidityDelta } -> (u256, u256)
-        uses (ctx, mut evm, mut store)
-        {
+        ModifyPosition uses (ctx, mut evm, mut store) {
             assert(ctx.caller().inner == ctx.address().inner)
-            let tick_lower = tickLower.val as i256
-            let tick_upper = tickUpper.val as i256
+            let owner = Address { inner: evm.calldataload(4) }
+            let tick_lower = decode_int24_word(evm.calldataload(36))
+            let tick_upper = decode_int24_word(evm.calldataload(68))
+            let liquidity_delta = decode_i128_word(evm.calldataload(100))
             check_ticks(tick_lower, tick_upper: tick_upper)
 
             let current_time: u32 = store.time.downcast_unchecked()
@@ -891,11 +899,11 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
 
             let mut flipped_lower = false
             let mut flipped_upper = false
-            if liquidityDelta != 0 {
+            if liquidity_delta != 0 {
                 flipped_lower = tick::update_at(
                     tick: tick_lower,
                     tick_current: tick_current_i,
-                    liquidity_delta: liquidityDelta,
+                    liquidity_delta,
                     fee_growth_global0_x128: store.fee_growth_global0_x128,
                     fee_growth_global1_x128: store.fee_growth_global1_x128,
                     seconds_per_liquidity_cumulative_x128,
@@ -908,7 +916,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 flipped_upper = tick::update_at(
                     tick: tick_upper,
                     tick_current: tick_current_i,
-                    liquidity_delta: liquidityDelta,
+                    liquidity_delta,
                     fee_growth_global0_x128: store.fee_growth_global0_x128,
                     fee_growth_global1_x128: store.fee_growth_global1_x128,
                     seconds_per_liquidity_cumulative_x128,
@@ -951,11 +959,11 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             )
             position::update(
                 base_slot: position_slot,
-                liquidity_delta: liquidityDelta,
+                liquidity_delta,
                 fee_growth_inside0_x128,
                 fee_growth_inside1_x128,
             )
-            if liquidityDelta < 0 {
+            if liquidity_delta < 0 {
                 if flipped_lower {
                     tick::clear_at(tick: tick_lower, ticks_slot: TICKS_SLOT)
                 }
@@ -964,12 +972,12 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 }
             }
 
-            let amount: u128 = if liquidityDelta < 0 {
-                (0 - (liquidityDelta as i256)).downcast_unchecked()
+            let amount: u128 = if liquidity_delta < 0 {
+                (0 - (liquidity_delta as i256)).downcast_unchecked()
             } else {
-                liquidityDelta.downcast_unchecked()
+                liquidity_delta.downcast_unchecked()
             }
-            let round_up = liquidityDelta > 0
+            let round_up = liquidity_delta > 0
             let amount0 = if tick_current_i < tick_lower {
                 get_amount0_delta(
                     sqrt_ratio_a_x96: get_sqrt_ratio_at_tick(tick: tick_lower),
@@ -1010,10 +1018,10 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 store.observation0_tick_cumulative = tick_cumulative.downcast_unchecked()
                 store
                     .observation0_seconds_per_liquidity_cumulative_x128 = seconds_per_liquidity_cumulative_x128
-                store.liquidity = add_delta(store.liquidity, liquidityDelta)
+                store.liquidity = add_delta(store.liquidity, liquidity_delta)
             }
 
-            if liquidityDelta < 0 && (amount0 > 0 || amount1 > 0) {
+            if liquidity_delta < 0 && (amount0 > 0 || amount1 > 0) {
                 let (
                     liquidity_value,
                     fee_growth_inside0_last_x128,
@@ -1031,7 +1039,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 )
             }
 
-            (amount0, amount1)
+            return_pair(amount0, amount1)
         }
 
         Mint uses (ctx, mut call, mut evm, mut store) {
