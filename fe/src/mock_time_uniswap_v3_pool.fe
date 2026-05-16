@@ -825,21 +825,23 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             let amount1 = evm.calldataload(68)
             let data_offset = evm.calldataload(100)
             let data_start = 4 + data_offset
-            let pay0 = evm.calldataload(data_start + 64)
-            let pay1 = evm.calldataload(data_start + 96)
             let fee0 = ((amount0 * (store.fee as u256)) + 999999) / 1000000
             let fee1 = ((amount1 * (store.fee as u256)) + 999999) / 1000000
+            let balance0_before = balance_of(token: store.token0, account: ctx.address())
+            let balance1_before = balance_of(token: store.token1, account: ctx.address())
             if amount0 > 0 {
-                assert(pay0 >= amount0 + fee0)
                 transfer_scratch(token: store.token0, to: recipient, value: amount0)
             }
             if amount1 > 0 {
-                assert(pay1 >= amount1 + fee1)
                 transfer_scratch(token: store.token1, to: recipient, value: amount1)
             }
             flash_callback(caller: ctx.caller(), fee0, fee1, data_start)
-            let paid0 = sub_u256(a: pay0, b: amount0)
-            let paid1 = sub_u256(a: pay1, b: amount1)
+            let balance0_after = balance_of(token: store.token0, account: ctx.address())
+            let balance1_after = balance_of(token: store.token1, account: ctx.address())
+            assert(balance0_before + fee0 <= balance0_after)
+            assert(balance1_before + fee1 <= balance1_after)
+            let paid0 = sub_u256(a: balance0_after, b: balance0_before)
+            let paid1 = sub_u256(a: balance1_after, b: balance1_before)
             if paid0 > 0 {
                 let feeProtocol0 = store.fee_protocol & 0x0f
                 let fees0 = if feeProtocol0 == 0 {
