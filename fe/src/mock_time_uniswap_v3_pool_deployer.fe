@@ -50,18 +50,16 @@ fn clear_parameters() uses (evm: mut Evm) {
 fn pool_salt(token0: Address, token1: Address, fee: u32, tick_spacing: i32) -> u256
 uses (evm: mut Evm)
 {
-    let ptr = std::evm::mem::alloc(0)
-    evm.mstore(addr: ptr, value: token0.inner << 96)
-    evm.mstore(addr: ptr + 20, value: token1.inner << 96)
-    evm.mstore(addr: ptr + 40, value: (fee as u256) << 232)
-    evm.mstore(addr: ptr + 43, value: int24_word(tick_spacing) << 232)
-    evm.keccak256(offset: ptr, len: 46)
+    evm.mstore(addr: 0, value: token0.inner << 96)
+    evm.mstore(addr: 20, value: token1.inner << 96)
+    evm.mstore(addr: 40, value: (fee as u256) << 232)
+    evm.mstore(addr: 43, value: int24_word(tick_spacing) << 232)
+    evm.keccak256(offset: 0, len: 46)
 }
 
 fn emit_pool_deployed(_ pool: Address) uses (evm: mut Evm) {
-    let ptr = std::evm::mem::alloc(0)
-    evm.mstore(addr: ptr, value: pool.inner)
-    evm.log1(offset: ptr, len: 32, topic0: POOL_DEPLOYED_TOPIC)
+    evm.mstore(addr: 0, value: pool.inner)
+    evm.log1(offset: 0, len: 32, topic0: POOL_DEPLOYED_TOPIC)
 }
 
 fn return_parameters() uses (evm: mut Evm) {
