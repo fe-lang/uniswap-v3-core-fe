@@ -911,9 +911,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 } else {
                     paid0 / (feeProtocol0 as u256)
                 }
-                if fees0 > 0 {
-                    store.protocol_fee0 += fees0.downcast_unchecked()
-                }
+                store.protocol_fee0 += fees0.downcast_unchecked()
                 store.fee_growth_global0_x128 = add_u256(
                     a: store.fee_growth_global0_x128,
                     b: mul_div(paid0 - fees0, Q128, denominator: store.liquidity as u256),
@@ -926,9 +924,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 } else {
                     paid1 / (feeProtocol1 as u256)
                 }
-                if fees1 > 0 {
-                    store.protocol_fee1 += fees1.downcast_unchecked()
-                }
+                store.protocol_fee1 += fees1.downcast_unchecked()
                 store.fee_growth_global1_x128 = add_u256(
                     a: store.fee_growth_global1_x128,
                     b: mul_div(paid1 - fees1, Q128, denominator: store.liquidity as u256),
@@ -944,12 +940,14 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             )
         }
 
-        Swap uses (ctx, mut evm, mut store) {
+        Swap uses (ctx, mut call, mut evm, mut store) {
             check_unlocked(store.unlocked)
             let zero_for_one = evm.calldataload(36) != 0
+            let amount_specified = evm.calldataload(68)
             let data_offset = evm.calldataload(132)
             let data_start = 4 + data_offset
             let data_len = evm.calldataload(data_start)
+            assert_msg(amount_specified != 0, "AS")
             if data_len == 0 {
                 store.unlocked = false
                 evm.mstore(addr: 0, value: SWAP_CALLBACK_SELECTOR << 224)
@@ -967,6 +965,76 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 let ret_len = evm.returndatasize()
                 evm.returndatacopy(dest: 0, offset: 0, len: ret_len)
                 evm.revert(offset: 0, len: ret_len)
+            }
+            if data_len == 32 {
+                store.unlocked = false
+                let input_token = if zero_for_one {
+                    store.token0
+                } else {
+                    store.token1
+                }
+                let balance_before = balance_of(token: input_token, account: ctx.address())
+                let ptr = 512
+                evm.mstore(addr: ptr, value: SWAP_CALLBACK_SELECTOR << 224)
+                evm.mstore(
+                    addr: ptr + 4,
+                    value: if zero_for_one { amount_specified } else { 0 },
+                )
+                evm.mstore(
+                    addr: ptr + 36,
+                    value: if zero_for_one { 0 } else { amount_specified },
+                )
+                evm.mstore(addr: ptr + 68, value: 96)
+                evm.mstore(addr: ptr + 100, value: 32)
+                evm.calldatacopy(dest: ptr + 132, offset: data_start + 32, len: 32)
+                assert(
+                    call.raw_call(
+                        addr: ctx.caller(),
+                        gas: 1000000,
+                        value: 0,
+                        args_offset: ptr,
+                        args_len: 164,
+                    ),
+                )
+                let balance_after = balance_of(token: input_token, account: ctx.address())
+                assert_msg(balance_before + amount_specified <= balance_after, "IIA")
+
+                let fee_amount = mul_div(amount_specified, store.fee as u256, denominator: 1000000)
+                let fee_protocol = if zero_for_one {
+                    store.fee_protocol & 0x0f
+                } else {
+                    store.fee_protocol >> 4
+                }
+                let protocol_fees = if fee_protocol == 0 {
+                    0
+                } else {
+                    fee_amount / (fee_protocol as u256)
+                }
+                if zero_for_one {
+                    store.protocol_fee0 += protocol_fees.downcast_unchecked()
+                    store.fee_growth_global0_x128 = add_u256(
+                        a: store.fee_growth_global0_x128,
+                        b: mul_div(
+                            fee_amount - protocol_fees,
+                            Q128,
+                            denominator: store.liquidity as u256,
+                        ),
+                    )
+                    store.unlocked = true
+                    return_pair(amount0: amount_specified, amount1: 0)
+                }
+
+                store.protocol_fee1 += protocol_fees.downcast_unchecked()
+                store.fee_growth_global1_x128 = add_u256(
+                    a: store.fee_growth_global1_x128,
+                    b: mul_div(
+                        fee_amount - protocol_fees,
+                        Q128,
+                        denominator: store.liquidity as u256,
+                    ),
+                )
+                store.unlocked = true
+                return_pair(amount0: 0, amount1: amount_specified)
             }
             let pay0 = evm.calldataload(data_start + 64)
             let pay1 = evm.calldataload(data_start + 96)
