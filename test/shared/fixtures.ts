@@ -10,6 +10,8 @@ import { getContractFactory } from './feArtifacts'
 
 import { Fixture } from 'ethereum-waffle'
 
+const usingFeArtifacts = process.env.FE_ARTIFACTS === '1'
+
 interface FactoryFixture {
   factory: UniswapV3Factory
 }
@@ -59,7 +61,9 @@ export const poolFixture: Fixture<PoolFixture> = async function (): Promise<Pool
   const { factory } = await factoryFixture()
   const { token0, token1, token2 } = await tokensFixture()
 
-  const MockTimeUniswapV3PoolDeployerFactory = await getContractFactory('MockTimeUniswapV3PoolDeployer')
+  const MockTimeUniswapV3PoolDeployerFactory = usingFeArtifacts
+    ? undefined
+    : await getContractFactory('MockTimeUniswapV3PoolDeployer')
   const MockTimeUniswapV3PoolFactory = await getContractFactory('MockTimeUniswapV3Pool')
 
   const calleeContractFactory = await getContractFactory('TestUniswapV3Callee')
@@ -76,7 +80,19 @@ export const poolFixture: Fixture<PoolFixture> = async function (): Promise<Pool
     swapTargetCallee,
     swapTargetRouter,
     createPool: async (fee, tickSpacing, firstToken = token0, secondToken = token1) => {
-      const mockTimePoolDeployer = (await MockTimeUniswapV3PoolDeployerFactory.deploy()) as MockTimeUniswapV3PoolDeployer
+      if (usingFeArtifacts) {
+        const pool = (await MockTimeUniswapV3PoolFactory.deploy(
+          factory.address,
+          firstToken.address,
+          secondToken.address,
+          fee,
+          tickSpacing
+        )) as MockTimeUniswapV3Pool
+        await pool.deployed()
+        return pool
+      }
+
+      const mockTimePoolDeployer = (await MockTimeUniswapV3PoolDeployerFactory!.deploy()) as MockTimeUniswapV3PoolDeployer
       const tx = await mockTimePoolDeployer.deploy(
         factory.address,
         firstToken.address,

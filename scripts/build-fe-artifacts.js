@@ -498,7 +498,13 @@ const abiOverrides = {
   MockTimeUniswapV3Pool: [
     {
       type: 'constructor',
-      inputs: [],
+      inputs: [
+        { name: 'factory', type: 'address' },
+        { name: 'token0', type: 'address' },
+        { name: 'token1', type: 'address' },
+        { name: 'fee', type: 'uint24' },
+        { name: 'tickSpacing', type: 'int24' },
+      ],
       stateMutability: 'nonpayable',
     },
     {
@@ -719,6 +725,20 @@ const abiOverrides = {
       name: 'liquidity',
       inputs: [],
       outputs: [{ name: '', type: 'uint128' }],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
+      name: 'snapshotCumulativesInside',
+      inputs: [
+        { name: 'tickLower', type: 'int24' },
+        { name: 'tickUpper', type: 'int24' },
+      ],
+      outputs: [
+        { name: 'tickCumulativeInside', type: 'int56' },
+        { name: 'secondsPerLiquidityInsideX128', type: 'uint160' },
+        { name: 'secondsInside', type: 'uint32' },
+      ],
       stateMutability: 'view',
     },
     {

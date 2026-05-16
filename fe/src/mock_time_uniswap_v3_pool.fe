@@ -75,6 +75,9 @@ msg MockTimeUniswapV3PoolMsg {
     #[selector = sol("liquidity()")]
     Liquidity -> u128,
 
+    #[selector = 0xa38807f2]
+    SnapshotCumulativesInside,
+
     #[selector = 0x8206a4d1]
     SetFeeProtocol,
 
@@ -148,6 +151,17 @@ fn int24_abi_word(_ value: i32) -> u256 {
     int_key(value as i256)
 }
 
+fn decode_int24_word(_ word: u256) -> i256 {
+    let value = word & 0xffffff
+    if (value & 0x800000) == 0 {
+        return value.downcast_unchecked()
+    }
+
+    let magnitude = ((0xffffff - value) + 1) & 0xffffff
+    let magnitude_i: i256 = magnitude.downcast_unchecked()
+    0 - magnitude_i
+}
+
 fn check_ticks(tick_lower: i256, tick_upper: i256) {
     assert_msg(tick_lower < tick_upper, "TLU")
     assert_msg(tick_lower >= MIN_TICK, "TLM")
@@ -170,6 +184,16 @@ fn current_seconds_per_liquidity(
 fn min_u128(_ a: u128, _ b: u128) -> u128 {
     if a < b { return a }
     b
+}
+
+#[arithmetic(unchecked)]
+fn sub_u256(a: u256, b: u256) -> u256 {
+    a - b
+}
+
+#[arithmetic(unchecked)]
+fn sub_i256(a: i256, b: i256) -> i256 {
+    a - b
 }
 
 fn copy_words(dest: u256, src: u256, len: u256) uses (evm: mut Evm) {
@@ -338,6 +362,20 @@ uses (evm: mut Evm)
     )
 }
 
+fn return_snapshot(
+    tick_cumulative_inside: i256,
+    seconds_per_liquidity_inside_x128: u256,
+    seconds_inside: u32,
+) -> !
+uses (evm: mut Evm)
+{
+    let ptr = std::evm::mem::alloc(96)
+    evm.mstore(addr: ptr, value: int_key(tick_cumulative_inside))
+    evm.mstore(addr: ptr + 32, value: seconds_per_liquidity_inside_x128)
+    evm.mstore(addr: ptr + 64, value: seconds_inside as u256)
+    evm.return_data(offset: ptr, len: 96)
+}
+
 pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
     mut store: MockTimePoolStore,
 
@@ -463,6 +501,73 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
 
         Liquidity -> u128 uses (store) {
             store.liquidity
+        }
+
+        SnapshotCumulativesInside uses (mut evm, store) {
+            let lower = decode_int24_word(evm.calldataload(4))
+            let upper = decode_int24_word(evm.calldataload(36))
+            check_ticks(tick_lower: lower, tick_upper: upper)
+
+            let (
+                _,
+                _,
+                _,
+                _,
+                tick_cumulative_lower,
+                seconds_per_liquidity_outside_lower,
+                seconds_outside_lower,
+                initialized_lower,
+            ) = tick::read_tick_at(lower, ticks_slot: TICKS_SLOT)
+            assert(initialized_lower)
+            let (
+                _,
+                _,
+                _,
+                _,
+                tick_cumulative_upper,
+                seconds_per_liquidity_outside_upper,
+                seconds_outside_upper,
+                initialized_upper,
+            ) = tick::read_tick_at(upper, ticks_slot: TICKS_SLOT)
+            assert(initialized_upper)
+
+            let tick_current = store.tick as i256
+            assert(tick_current >= lower && tick_current < upper)
+            let current_time: u32 = store.time.downcast_unchecked()
+            let time_delta = current_time - store.observation0_block_timestamp
+            let tick_cumulative = current_tick_cumulative(
+                tick_cumulative: store.observation0_tick_cumulative,
+                tick_current: store.tick,
+                time_delta,
+            )
+            let seconds_per_liquidity_cumulative_x128 = current_seconds_per_liquidity(
+                seconds_per_liquidity_cumulative_x128: store
+                    .observation0_seconds_per_liquidity_cumulative_x128,
+                time_delta,
+                liquidity: store.liquidity,
+            )
+            let seconds_per_liquidity_inside_minus_lower = sub_u256(
+                a: seconds_per_liquidity_cumulative_x128,
+                b: seconds_per_liquidity_outside_lower,
+            )
+            let seconds_per_liquidity_inside_x128 = sub_u256(
+                a: seconds_per_liquidity_inside_minus_lower,
+                b: seconds_per_liquidity_outside_upper,
+            )
+            let seconds_inside = current_time - seconds_outside_lower - seconds_outside_upper
+            let tick_cumulative_inside_minus_lower = sub_i256(
+                a: tick_cumulative,
+                b: tick_cumulative_lower,
+            )
+            let tick_cumulative_inside = sub_i256(
+                a: tick_cumulative_inside_minus_lower,
+                b: tick_cumulative_upper,
+            )
+            return_snapshot(
+                tick_cumulative_inside,
+                seconds_per_liquidity_inside_x128,
+                seconds_inside,
+            )
         }
 
         SetFeeProtocol uses (ctx, mut call, mut evm, mut store) {
