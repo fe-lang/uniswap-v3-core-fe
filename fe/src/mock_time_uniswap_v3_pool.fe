@@ -34,23 +34,23 @@ const FLASH_CALLBACK_SELECTOR: u256 = 0xe9cbafb0
 const SWAP_CALLBACK_SELECTOR: u256 = 0xfa461e33
 
 msg MockTimeUniswapV3PoolMsg {
-    #[selector = sol("factory()")]
-    Factory -> u256,
+    #[selector = 0xc45a0155]
+    Factory,
 
-    #[selector = sol("token0()")]
-    Token0 -> u256,
+    #[selector = 0x0dfe1681]
+    Token0,
 
-    #[selector = sol("token1()")]
-    Token1 -> u256,
+    #[selector = 0xd21220a7]
+    Token1,
 
-    #[selector = sol("fee()")]
-    Fee -> u32,
+    #[selector = 0xddca3f43]
+    Fee,
 
-    #[selector = sol("tickSpacing()")]
-    TickSpacing -> i32,
+    #[selector = 0xd0c93a7c]
+    TickSpacing,
 
-    #[selector = sol("maxLiquidityPerTick()")]
-    MaxLiquidityPerTick -> u128,
+    #[selector = 0x70cf754a]
+    MaxLiquidityPerTick,
 
     #[selector = 0x3850c7bd]
     Slot0,
@@ -73,14 +73,14 @@ msg MockTimeUniswapV3PoolMsg {
     #[selector = sol("setFeeGrowthGlobal1X128(uint256)")]
     SetFeeGrowthGlobal1X128 { value: u256 },
 
-    #[selector = sol("feeGrowthGlobal0X128()")]
-    FeeGrowthGlobal0X128 -> u256,
+    #[selector = 0xf3058399]
+    FeeGrowthGlobal0X128,
 
-    #[selector = sol("feeGrowthGlobal1X128()")]
-    FeeGrowthGlobal1X128 -> u256,
+    #[selector = 0x46141319]
+    FeeGrowthGlobal1X128,
 
-    #[selector = sol("liquidity()")]
-    Liquidity -> u128,
+    #[selector = 0x1a686502]
+    Liquidity,
 
     #[selector = 0x1ad8b03b]
     ProtocolFees,
@@ -463,6 +463,11 @@ fn return_pair(amount0: u256, amount1: u256) -> ! uses (evm: mut Evm) {
     evm.return_data(offset: 0, len: 64)
 }
 
+fn return_word(value: u256) -> ! uses (evm: mut Evm) {
+    evm.mstore(addr: 0, value)
+    evm.return_data(offset: 0, len: 32)
+}
+
 fn return_slot0(
     sqrt_price_x96: u256,
     tick: i32,
@@ -557,28 +562,28 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
     }
 
     recv MockTimeUniswapV3PoolMsg {
-        Factory -> u256 uses (store) {
-            store.factory.inner
+        Factory uses (store, mut evm) {
+            return_word(value: store.factory.inner)
         }
 
-        Token0 -> u256 uses (store) {
-            store.token0.inner
+        Token0 uses (store, mut evm) {
+            return_word(value: store.token0.inner)
         }
 
-        Token1 -> u256 uses (store) {
-            store.token1.inner
+        Token1 uses (store, mut evm) {
+            return_word(value: store.token1.inner)
         }
 
-        Fee -> u32 uses (store) {
-            store.fee
+        Fee uses (store, mut evm) {
+            return_word(value: store.fee as u256)
         }
 
-        TickSpacing -> i32 uses (store) {
-            store.tick_spacing
+        TickSpacing uses (store, mut evm) {
+            return_word(value: int_key(store.tick_spacing as i256))
         }
 
-        MaxLiquidityPerTick -> u128 uses (store) {
-            store.max_liquidity_per_tick
+        MaxLiquidityPerTick uses (store, mut evm) {
+            return_word(value: store.max_liquidity_per_tick as u256)
         }
 
         Slot0 uses (store, mut evm) {
@@ -653,16 +658,16 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             store.fee_growth_global1_x128 = value
         }
 
-        FeeGrowthGlobal0X128 -> u256 uses (store) {
-            store.fee_growth_global0_x128
+        FeeGrowthGlobal0X128 uses (store, mut evm) {
+            return_word(value: store.fee_growth_global0_x128)
         }
 
-        FeeGrowthGlobal1X128 -> u256 uses (store) {
-            store.fee_growth_global1_x128
+        FeeGrowthGlobal1X128 uses (store, mut evm) {
+            return_word(value: store.fee_growth_global1_x128)
         }
 
-        Liquidity -> u128 uses (store) {
-            store.liquidity
+        Liquidity uses (store, mut evm) {
+            return_word(value: store.liquidity as u256)
         }
 
         ProtocolFees uses (store, mut evm) {
