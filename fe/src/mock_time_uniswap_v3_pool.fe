@@ -343,7 +343,7 @@ uses (call: mut Call, evm: mut Evm)
     let data_len = evm.calldataload(data_start)
     let data_size = 32 + (((data_len + 31) / 32) * 32)
     let len = 100 + data_size
-    let ptr = std::evm::mem::alloc(len)
+    let ptr = 512
     evm.mstore(addr: ptr, value: (0xd3487997 as u256) << 224)
     evm.mstore(addr: ptr + 4, value: amount0)
     evm.mstore(addr: ptr + 36, value: amount1)
