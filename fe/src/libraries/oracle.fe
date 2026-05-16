@@ -1,8 +1,12 @@
+use std::abi::sol::{self, Int24}
 use std::evm::{assert_msg, mem, Evm, RawMem, RawOps, RawStorage}
 use super::tick_bitmap::int_key
+use super::tick_math::{MAX_TICK, MIN_TICK}
 
 const OBSERVATION_COUNT: u256 = 65535
 const STATE_SLOT: u256 = 65535
+const ECHIDNA_INITIALIZED_SLOT: u256 = 65536
+const ECHIDNA_TIME_PASSED_SLOT: u256 = 65537
 const MAX_U16: u256 = 0xffff
 const MAX_U32: u256 = 0xffffffff
 const MAX_U128: u256 = 0xffffffffffffffffffffffffffffffff
@@ -91,6 +95,29 @@ fn state_cardinality() -> u16 uses (evm: Evm) {
 
 fn state_cardinality_next() -> u16 uses (evm: Evm) {
     ((state_word() >> 216) & MAX_U16).downcast_unchecked()
+}
+
+fn echidna_initialized() -> bool uses (evm: Evm) {
+    evm.sload(ECHIDNA_INITIALIZED_SLOT) != 0
+}
+
+fn set_echidna_initialized() uses (evm: mut Evm) {
+    evm.sstore(slot: ECHIDNA_INITIALIZED_SLOT, value: 1)
+}
+
+fn echidna_time_passed() -> u32 uses (evm: Evm) {
+    (evm.sload(ECHIDNA_TIME_PASSED_SLOT) & MAX_U32).downcast_unchecked()
+}
+
+fn set_echidna_time_passed(_ time_passed: u32) uses (evm: mut Evm) {
+    evm.sstore(slot: ECHIDNA_TIME_PASSED_SLOT, value: time_passed as u256)
+}
+
+#[arithmetic(unchecked)]
+fn limit_echidna_time_passed(by: u32) uses (evm: mut Evm) {
+    let time_passed = echidna_time_passed()
+    assert(time_passed + by >= time_passed)
+    set_echidna_time_passed(time_passed + by)
 }
 
 fn write_state(
@@ -525,6 +552,155 @@ pub contract OracleTest uses (evm: mut Evm) {
             }
 
             evm.revert(offset: 0, len: 0)
+        }
+    }
+}
+
+msg OracleEchidnaTestMsg {
+    #[selector = sol("initialize(uint32,int24,uint128)")]
+    Initialize { time: u32, tick: Int24, liquidity: u128 },
+
+    #[selector = sol("advanceTime(uint32)")]
+    AdvanceTime { by: u32 },
+
+    #[selector = sol("update(uint32,int24,uint128)")]
+    Update { advanceTimeBy: u32, tick: Int24, liquidity: u128 },
+
+    #[selector = sol("grow(uint16)")]
+    Grow { cardinality: u16 },
+
+    #[selector = sol("echidna_indexAlwaysLtCardinality()")]
+    EchidnaIndexAlwaysLtCardinality -> bool,
+
+    #[selector = sol("echidna_AlwaysInitialized()")]
+    EchidnaAlwaysInitialized -> bool,
+
+    #[selector = sol("echidna_cardinalityAlwaysLteNext()")]
+    EchidnaCardinalityAlwaysLteNext -> bool,
+
+    #[selector = sol("echidna_canAlwaysObserve0IfInitialized()")]
+    EchidnaCanAlwaysObserve0IfInitialized -> bool,
+
+    #[selector = sol(
+        "checkTwoAdjacentObservationsTickCumulativeModTimeElapsedAlways0(uint16)",
+    )]
+    CheckTwoAdjacentObservationsTickCumulativeModTimeElapsedAlways0 { index: u16 },
+
+    #[selector = sol("checkTimeWeightedAveragesAlwaysFitsType(uint32)")]
+    CheckTimeWeightedAveragesAlwaysFitsType { secondsAgo: u32 },
+}
+
+#[arithmetic(unchecked)]
+fn check_two_adjacent_observations_tick_cumulative_mod_time_elapsed_always0(index: u16)
+uses (evm: Evm)
+{
+    let cardinality = state_cardinality()
+    assert(
+        index < cardinality && index != (state_index() + 1) % cardinality,
+    )
+
+    let previous_index = if index == 0 {
+        cardinality - 1
+    } else {
+        index - 1
+    }
+    let observation0 = read_observation(previous_index as u256)
+    let observation1 = read_observation(index as u256)
+    assert(observation0.initialized)
+    assert(observation1.initialized)
+
+    let time_elapsed = observation1.block_timestamp - observation0.block_timestamp
+    assert(time_elapsed > 0)
+    assert(
+        (observation1.tick_cumulative - observation0.tick_cumulative) % (time_elapsed as i256) == 0,
+    )
+}
+
+#[arithmetic(unchecked)]
+fn check_time_weighted_averages_always_fit_type(seconds_ago: u32)
+uses (evm: Evm)
+{
+    assert(echidna_initialized())
+    assert(seconds_ago > 0)
+
+    let (tick_cumulative0, seconds_per_liquidity_cumulative_x128_0) = observe_single(seconds_ago)
+    let (tick_cumulative1, seconds_per_liquidity_cumulative_x128_1) = observe_single(seconds_ago: 0)
+    let numerator = tick_cumulative1 - tick_cumulative0
+    let seconds_ago_i = seconds_ago as i256
+    let mut time_weighted_tick = numerator / seconds_ago_i
+    if numerator < 0 && numerator % seconds_ago_i != 0 {
+        time_weighted_tick = time_weighted_tick - 1
+    }
+
+    assert(
+        time_weighted_tick <= MAX_TICK && time_weighted_tick >= MIN_TICK,
+    )
+
+    let seconds_per_liquidity_delta = seconds_per_liquidity_cumulative_x128_1
+        + (0 - seconds_per_liquidity_cumulative_x128_0)
+    let denominator = seconds_per_liquidity_delta << 32
+    assert(
+        ((seconds_ago as u256) * MAX_U160) / denominator <= MAX_U128,
+    )
+}
+
+pub contract OracleEchidnaTest uses (evm: mut Evm) {
+    recv OracleEchidnaTestMsg {
+        Initialize { time, tick, liquidity } uses (mut evm) {
+            initialize(time, tick: tick.val as i256, liquidity)
+            set_echidna_initialized()
+        }
+
+        AdvanceTime { by } uses (mut evm) {
+            limit_echidna_time_passed(by)
+            advance_time(by)
+        }
+
+        Update { advanceTimeBy, tick, liquidity }
+        uses (mut evm)
+        {
+            limit_echidna_time_passed(by: advanceTimeBy)
+            update(advanceTimeBy, tick: tick.val as i256, liquidity)
+        }
+
+        Grow { cardinality } uses (mut evm) {
+            grow(cardinality)
+        }
+
+        EchidnaIndexAlwaysLtCardinality -> bool uses (evm) {
+            state_index() < state_cardinality() || !echidna_initialized()
+        }
+
+        EchidnaAlwaysInitialized -> bool uses (evm) {
+            let observation = read_observation(0)
+            state_cardinality() == 0 || observation.initialized
+        }
+
+        EchidnaCardinalityAlwaysLteNext -> bool uses (evm) {
+            state_cardinality() <= state_cardinality_next()
+        }
+
+        EchidnaCanAlwaysObserve0IfInitialized -> bool
+        uses (evm)
+        {
+            if !echidna_initialized() {
+                return true
+            }
+
+            observe_single(seconds_ago: 0)
+            true
+        }
+
+        CheckTwoAdjacentObservationsTickCumulativeModTimeElapsedAlways0 { index }
+        uses (evm)
+        {
+            check_two_adjacent_observations_tick_cumulative_mod_time_elapsed_always0(index)
+        }
+
+        CheckTimeWeightedAveragesAlwaysFitsType { secondsAgo }
+        uses (evm)
+        {
+            check_time_weighted_averages_always_fit_type(seconds_ago: secondsAgo)
         }
     }
 }
