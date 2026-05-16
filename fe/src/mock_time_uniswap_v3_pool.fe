@@ -25,6 +25,7 @@ const INITIALIZE_TOPIC: u256 = 0x98636036cb66a9c19a37435efc1e90142190214e8abeb82
 const INCREASE_OBSERVATION_CARDINALITY_NEXT_TOPIC: u256 = 0xac49e518f90a358f652e4400164f05a5d8f7e35e7747279bc3a93dbf584e125a
 const MINT_TOPIC: u256 = 0x7a53080ba414158be7ec69b987b5fb7d07dee101fe85488f0853ae16239d0bde
 const BURN_TOPIC: u256 = 0x0c396cd989a39f4459b5fa1aed6a9a8dcdbc45908acfd67e028cd568da98982c
+const COLLECT_TOPIC: u256 = 0x70935338e69775456a85ddef226c395fb668b63fa0115f5f20610b388e6ca9c0
 const SET_FEE_PROTOCOL_TOPIC: u256 = 0x973d8d92bb299f4af6ce49b52a8adb85ae46b9f214c4c4fc06ac77401237b133
 const FLASH_TOPIC: u256 = 0xbdbdb71d7860376ba52b25a5028beea23581364a40522f6bcfb86bb1f2dca633
 
@@ -1011,8 +1012,18 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                     tokens_owed1_value: tokens_owed1 - amount1,
                 )
             }
-
             store.unlocked = true
+            evm.mstore(addr: 0, value: recipient.inner)
+            evm.mstore(addr: 32, value: amount0 as u256)
+            evm.mstore(addr: 64, value: amount1 as u256)
+            evm.log4(
+                offset: 0,
+                len: 96,
+                topic0: COLLECT_TOPIC,
+                topic1: ctx.caller().inner,
+                topic2: int24_abi_word(tickLower.val),
+                topic3: int24_abi_word(tickUpper.val),
+            )
             (amount0, amount1)
         }
     }
