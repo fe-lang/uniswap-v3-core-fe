@@ -1,6 +1,7 @@
 use std::abi::sol::{Int24, Uint24}
 use std::evm::{assert_msg, Address, Call, Ctx, Evm, Log, RawMem, RawOps}
 use super::libraries::fixed_point_128::Q128
+use super::libraries::full_math::mul_div
 use super::libraries::liquidity_math::add_delta
 use super::libraries::position
 use super::libraries::safe_cast::to_int128
@@ -851,7 +852,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 }
                 store.fee_growth_global0_x128 = add_u256(
                     a: store.fee_growth_global0_x128,
-                    b: ((paid0 - fees0) * Q128) / (store.liquidity as u256),
+                    b: mul_div(paid0 - fees0, Q128, denominator: store.liquidity as u256),
                 )
             }
             if paid1 > 0 {
@@ -866,7 +867,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 }
                 store.fee_growth_global1_x128 = add_u256(
                     a: store.fee_growth_global1_x128,
-                    b: ((paid1 - fees1) * Q128) / (store.liquidity as u256),
+                    b: mul_div(paid1 - fees1, Q128, denominator: store.liquidity as u256),
                 )
             }
             emit_flash(
