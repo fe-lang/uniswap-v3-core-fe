@@ -27,6 +27,7 @@ const INCREASE_OBSERVATION_CARDINALITY_NEXT_TOPIC: u256 = 0xac49e518f90a358f652e
 const MINT_TOPIC: u256 = 0x7a53080ba414158be7ec69b987b5fb7d07dee101fe85488f0853ae16239d0bde
 const BURN_TOPIC: u256 = 0x0c396cd989a39f4459b5fa1aed6a9a8dcdbc45908acfd67e028cd568da98982c
 const COLLECT_TOPIC: u256 = 0x70935338e69775456a85ddef226c395fb668b63fa0115f5f20610b388e6ca9c0
+const COLLECT_PROTOCOL_TOPIC: u256 = 0x596b573906218d3411850b26a6b437d6c4522fdb43d2d2386263f86d50b8b151
 const SET_FEE_PROTOCOL_TOPIC: u256 = 0x973d8d92bb299f4af6ce49b52a8adb85ae46b9f214c4c4fc06ac77401237b133
 const FLASH_TOPIC: u256 = 0xbdbdb71d7860376ba52b25a5028beea23581364a40522f6bcfb86bb1f2dca633
 const FLASH_CALLBACK_SELECTOR: u256 = 0xe9cbafb0
@@ -91,7 +92,7 @@ msg MockTimeUniswapV3PoolMsg {
     SetFeeProtocol,
 
     #[selector = 0x85b66729]
-    CollectProtocol -> (u256, u256),
+    CollectProtocol,
 
     #[selector = 0x490e6cbc]
     Flash,
@@ -260,7 +261,7 @@ uses (evm: mut Evm)
 
     let success = evm.raw_call(
             addr: token,
-            gas: 1000000,
+            gas: evm.gas(),
             value: 0,
             args_offset: 0,
             args_len: 68,
@@ -677,9 +678,43 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             evm.log1(offset: 0, len: 128, topic0: SET_FEE_PROTOCOL_TOPIC)
         }
 
-        CollectProtocol -> (u256, u256) uses (store) {
+        CollectProtocol uses (ctx, mut call, mut evm, mut store) {
             check_unlocked(store.unlocked)
-            (0, 0)
+            assert(
+                ctx.caller().inner == factory_owner(factory: store.factory),
+            )
+
+            let recipient = Address { inner: evm.calldataload(4) }
+            let amount0_requested = decode_u128_word(evm.calldataload(36))
+            let amount1_requested = decode_u128_word(evm.calldataload(68))
+            let mut amount0 = min_u128(a: amount0_requested, b: store.protocol_fee0)
+            let mut amount1 = min_u128(a: amount1_requested, b: store.protocol_fee1)
+
+            if amount0 > 0 {
+                if amount0 == store.protocol_fee0 {
+                    amount0 -= 1
+                }
+                store.protocol_fee0 -= amount0
+                transfer_scratch(token: store.token0, to: recipient, value: amount0 as u256)
+            }
+            if amount1 > 0 {
+                if amount1 == store.protocol_fee1 {
+                    amount1 -= 1
+                }
+                store.protocol_fee1 -= amount1
+                transfer_scratch(token: store.token1, to: recipient, value: amount1 as u256)
+            }
+
+            evm.mstore(addr: 0, value: amount0 as u256)
+            evm.mstore(addr: 32, value: amount1 as u256)
+            evm.log3(
+                offset: 0,
+                len: 64,
+                topic0: COLLECT_PROTOCOL_TOPIC,
+                topic1: ctx.caller().inner,
+                topic2: recipient.inner,
+            )
+            return_pair(amount0: amount0 as u256, amount1: amount1 as u256)
         }
 
         Flash uses (ctx, mut call, mut evm, mut store) {

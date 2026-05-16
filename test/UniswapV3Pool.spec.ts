@@ -1575,6 +1575,21 @@ describe('UniswapV3Pool', () => {
             BigNumber.from(11).mul(BigNumber.from(2).pow(128)).div(expandTo18Decimals(2))
           )
         })
+        it('collects protocol fees from flash payments', async () => {
+          await flash(0, 0, constants.AddressZero, 789, 1234)
+
+          await expect(pool.collectProtocol(other.address, MaxUint128, MaxUint128))
+            .to.emit(token0, 'Transfer')
+            .withArgs(pool.address, other.address, 130)
+            .to.emit(token1, 'Transfer')
+            .withArgs(pool.address, other.address, 204)
+            .to.emit(pool, 'CollectProtocol')
+            .withArgs(wallet.address, other.address, 130, 204)
+
+          const { token0: token0ProtocolFees, token1: token1ProtocolFees } = await pool.protocolFees()
+          expect(token0ProtocolFees).to.eq(1)
+          expect(token1ProtocolFees).to.eq(1)
+        })
         it('allows donating token0', async () => {
           await expect(flash(0, 0, constants.AddressZero, 567, 0))
             .to.emit(token0, 'Transfer')
