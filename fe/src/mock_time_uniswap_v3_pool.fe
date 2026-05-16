@@ -1,4 +1,4 @@
-use std::abi::sol::{self, Int24, Uint24, Uint160}
+use std::abi::sol::{Int24, Uint24}
 use std::evm::{assert_msg, Address, Call, Ctx, Evm, Log, RawMem, RawOps}
 use super::libraries::fixed_point_128::Q128
 use super::libraries::liquidity_math::add_delta
@@ -58,20 +58,20 @@ msg MockTimeUniswapV3PoolMsg {
     #[selector = 0x252c09d7]
     Observations,
 
-    #[selector = sol("initialize(uint160)")]
-    Initialize { sqrtPriceX96: Uint160 },
+    #[selector = 0xf637731d]
+    Initialize,
 
-    #[selector = sol("increaseObservationCardinalityNext(uint16)")]
-    IncreaseObservationCardinalityNext { observationCardinalityNext: u16 },
+    #[selector = 0x32148f67]
+    IncreaseObservationCardinalityNext,
 
-    #[selector = sol("advanceTime(uint256)")]
-    AdvanceTime { by: u256 },
+    #[selector = 0x07e32f0a]
+    AdvanceTime,
 
-    #[selector = sol("setFeeGrowthGlobal0X128(uint256)")]
-    SetFeeGrowthGlobal0X128 { value: u256 },
+    #[selector = 0xd380c679]
+    SetFeeGrowthGlobal0X128,
 
-    #[selector = sol("setFeeGrowthGlobal1X128(uint256)")]
-    SetFeeGrowthGlobal1X128 { value: u256 },
+    #[selector = 0xf6eb760f]
+    SetFeeGrowthGlobal1X128,
 
     #[selector = 0xf3058399]
     FeeGrowthGlobal0X128,
@@ -608,15 +608,15 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             )
         }
 
-        Initialize { sqrtPriceX96 } uses (mut store, mut evm) {
+        Initialize uses (mut store, mut evm) {
+            let sqrt_price_x96 = evm.calldataload(4)
             assert(store.sqrt_price_x96 == 0)
             assert_msg(
-                sqrtPriceX96.val >= min_sqrt_ratio() && sqrtPriceX96.val < max_sqrt_ratio(),
+                sqrt_price_x96 >= min_sqrt_ratio() && sqrt_price_x96 < max_sqrt_ratio(),
                 "R",
             )
-            let tick: i32 = get_tick_at_sqrt_ratio(sqrt_price_x96: sqrtPriceX96.val)
-                .downcast_unchecked()
-            store.sqrt_price_x96 = sqrtPriceX96.val
+            let tick: i32 = get_tick_at_sqrt_ratio(sqrt_price_x96).downcast_unchecked()
+            store.sqrt_price_x96 = sqrt_price_x96
             store.tick = tick
             store.observation_index = 0
             store.observation_cardinality = 1
@@ -625,17 +625,18 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             store.observation0_block_timestamp = store.time.downcast_unchecked()
             store.observation0_tick_cumulative = 0
             store.observation0_seconds_per_liquidity_cumulative_x128 = 0
-            emit_initialize(sqrt_price_x96: sqrtPriceX96.val, tick)
+            emit_initialize(sqrt_price_x96, tick)
         }
 
-        IncreaseObservationCardinalityNext { observationCardinalityNext }
-        uses (mut store, mut evm)
-        {
+        IncreaseObservationCardinalityNext uses (mut store, mut evm) {
+            let word = evm.calldataload(4)
+            assert(word <= 0xffff)
+            let observation_cardinality_next: u16 = word.downcast_unchecked()
             check_unlocked(store.unlocked)
             store.unlocked = false
             let old = store.observation_cardinality_next
-            let new = if observationCardinalityNext > old {
-                observationCardinalityNext
+            let new = if observation_cardinality_next > old {
+                observation_cardinality_next
             } else {
                 old
             }
@@ -646,16 +647,16 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             store.unlocked = true
         }
 
-        AdvanceTime { by } uses (mut store) {
-            store.time += by
+        AdvanceTime uses (mut store, mut evm) {
+            store.time += evm.calldataload(4)
         }
 
-        SetFeeGrowthGlobal0X128 { value } uses (mut store) {
-            store.fee_growth_global0_x128 = value
+        SetFeeGrowthGlobal0X128 uses (mut store, mut evm) {
+            store.fee_growth_global0_x128 = evm.calldataload(4)
         }
 
-        SetFeeGrowthGlobal1X128 { value } uses (mut store) {
-            store.fee_growth_global1_x128 = value
+        SetFeeGrowthGlobal1X128 uses (mut store, mut evm) {
+            store.fee_growth_global1_x128 = evm.calldataload(4)
         }
 
         FeeGrowthGlobal0X128 uses (store, mut evm) {
