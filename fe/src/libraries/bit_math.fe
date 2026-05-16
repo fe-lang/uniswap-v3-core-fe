@@ -43,6 +43,14 @@ msg BitMathTestMsg {
     GetGasCostOfLeastSignificantBit { x: u256 } -> u256,
 }
 
+msg BitMathEchidnaTestMsg {
+    #[selector = sol("mostSignificantBitInvariant(uint256)")]
+    MostSignificantBitInvariant { input: u256 },
+
+    #[selector = sol("leastSignificantBitInvariant(uint256)")]
+    LeastSignificantBitInvariant { input: u256 },
+}
+
 pub contract BitMathTest uses (evm: Evm) {
     recv BitMathTestMsg {
         MostSignificantBit { x } -> u8 {
@@ -67,6 +75,22 @@ pub contract BitMathTest uses (evm: Evm) {
             let gas_before = evm.gas()
             least_significant_bit(x)
             gas_before - evm.gas()
+        }
+    }
+}
+
+pub contract BitMathEchidnaTest {
+    recv BitMathEchidnaTestMsg {
+        MostSignificantBitInvariant { input } {
+            let msb = most_significant_bit(input)
+            assert(input >= ((1 as u256) << (msb as u256)))
+            assert(msb == 255 || input < ((1 as u256) << ((msb + 1) as u256)))
+        }
+
+        LeastSignificantBitInvariant { input } {
+            let lsb = least_significant_bit(input)
+            assert(input & ((1 as u256) << (lsb as u256)) != 0)
+            assert(input & (((1 as u256) << (lsb as u256)) - 1) == 0)
         }
     }
 }
