@@ -16,7 +16,6 @@ use super::libraries::tick_math::{
     MAX_TICK,
     MIN_TICK,
 }
-use super::libraries::transfer_helper::safe_transfer
 
 const TEST_POOL_START_TIME: u256 = 1601906400
 const TICKS_SLOT: u256 = 5
@@ -690,11 +689,11 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             let fee1 = ((amount1 * (store.fee as u256)) + 999999) / 1000000
             if amount0 > 0 {
                 assert(pay0 >= amount0 + fee0)
-                safe_transfer(token: store.token0, to: recipient, value: amount0)
+                transfer_scratch(token: store.token0, to: recipient, value: amount0)
             }
             if amount1 > 0 {
                 assert(pay1 >= amount1 + fee1)
-                safe_transfer(token: store.token1, to: recipient, value: amount1)
+                transfer_scratch(token: store.token1, to: recipient, value: amount1)
             }
             flash_callback(caller: ctx.caller(), fee0, fee1, data_start)
             let paid0 = sub_u256(a: pay0, b: amount0)
