@@ -297,20 +297,18 @@ uses (call: mut Call, evm: mut Evm)
 }
 
 fn emit_initialize(sqrt_price_x96: u256, tick: i32) uses (evm: mut Evm) {
-    let ptr = std::evm::mem::alloc(0)
-    evm.mstore(addr: ptr, value: sqrt_price_x96)
-    evm.mstore(addr: ptr + 32, value: int24_abi_word(tick))
-    evm.log1(offset: ptr, len: 64, topic0: INITIALIZE_TOPIC)
+    evm.mstore(addr: 0, value: sqrt_price_x96)
+    evm.mstore(addr: 32, value: int24_abi_word(tick))
+    evm.log1(offset: 0, len: 64, topic0: INITIALIZE_TOPIC)
 }
 
 fn emit_increase_observation_cardinality_next(old: u16, new: u16)
 uses (evm: mut Evm)
 {
-    let ptr = std::evm::mem::alloc(0)
-    evm.mstore(addr: ptr, value: old as u256)
-    evm.mstore(addr: ptr + 32, value: new as u256)
+    evm.mstore(addr: 0, value: old as u256)
+    evm.mstore(addr: 32, value: new as u256)
     evm.log1(
-        offset: ptr,
+        offset: 0,
         len: 64,
         topic0: INCREASE_OBSERVATION_CARDINALITY_NEXT_TOPIC,
     )
@@ -327,13 +325,12 @@ fn emit_mint(
 )
 uses (evm: mut Evm)
 {
-    let ptr = std::evm::mem::alloc(0)
-    evm.mstore(addr: ptr, value: sender.inner)
-    evm.mstore(addr: ptr + 32, value: amount as u256)
-    evm.mstore(addr: ptr + 64, value: amount0)
-    evm.mstore(addr: ptr + 96, value: amount1)
+    evm.mstore(addr: 0, value: sender.inner)
+    evm.mstore(addr: 32, value: amount as u256)
+    evm.mstore(addr: 64, value: amount0)
+    evm.mstore(addr: 96, value: amount1)
     evm.log4(
-        offset: ptr,
+        offset: 0,
         len: 128,
         topic0: MINT_TOPIC,
         topic1: owner.inner,
@@ -352,12 +349,11 @@ fn emit_burn(
 )
 uses (evm: mut Evm)
 {
-    let ptr = std::evm::mem::alloc(0)
-    evm.mstore(addr: ptr, value: amount as u256)
-    evm.mstore(addr: ptr + 32, value: amount0)
-    evm.mstore(addr: ptr + 64, value: amount1)
+    evm.mstore(addr: 0, value: amount as u256)
+    evm.mstore(addr: 32, value: amount0)
+    evm.mstore(addr: 64, value: amount1)
     evm.log4(
-        offset: ptr,
+        offset: 0,
         len: 96,
         topic0: BURN_TOPIC,
         topic1: owner.inner,
@@ -376,13 +372,12 @@ fn emit_flash(
 )
 uses (evm: mut Evm)
 {
-    let ptr = std::evm::mem::alloc(0)
-    evm.mstore(addr: ptr, value: amount0)
-    evm.mstore(addr: ptr + 32, value: amount1)
-    evm.mstore(addr: ptr + 64, value: paid0)
-    evm.mstore(addr: ptr + 96, value: paid1)
+    evm.mstore(addr: 0, value: amount0)
+    evm.mstore(addr: 32, value: amount1)
+    evm.mstore(addr: 64, value: paid0)
+    evm.mstore(addr: 96, value: paid1)
     evm.log3(
-        offset: ptr,
+        offset: 0,
         len: 128,
         topic0: FLASH_TOPIC,
         topic1: sender.inner,
@@ -397,11 +392,10 @@ fn return_snapshot(
 ) -> !
 uses (evm: mut Evm)
 {
-    let ptr = std::evm::mem::alloc(96)
-    evm.mstore(addr: ptr, value: int_key(tick_cumulative_inside))
-    evm.mstore(addr: ptr + 32, value: seconds_per_liquidity_inside_x128)
-    evm.mstore(addr: ptr + 64, value: seconds_inside as u256)
-    evm.return_data(offset: ptr, len: 96)
+    evm.mstore(addr: 0, value: int_key(tick_cumulative_inside))
+    evm.mstore(addr: 32, value: seconds_per_liquidity_inside_x128)
+    evm.mstore(addr: 64, value: seconds_inside as u256)
+    evm.return_data(offset: 0, len: 96)
 }
 
 pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
@@ -620,12 +614,11 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             let old = store.fee_protocol
             store.fee_protocol = ((feeProtocol0 as u256) | ((feeProtocol1 as u256) << 4))
                 .downcast_unchecked()
-            let ptr = std::evm::mem::alloc(0)
-            evm.mstore(addr: ptr, value: (old & 0x0f) as u256)
-            evm.mstore(addr: ptr + 32, value: (old >> 4) as u256)
-            evm.mstore(addr: ptr + 64, value: feeProtocol0 as u256)
-            evm.mstore(addr: ptr + 96, value: feeProtocol1 as u256)
-            evm.log1(offset: ptr, len: 128, topic0: SET_FEE_PROTOCOL_TOPIC)
+            evm.mstore(addr: 0, value: (old & 0x0f) as u256)
+            evm.mstore(addr: 32, value: (old >> 4) as u256)
+            evm.mstore(addr: 64, value: feeProtocol0 as u256)
+            evm.mstore(addr: 96, value: feeProtocol1 as u256)
+            evm.log1(offset: 0, len: 128, topic0: SET_FEE_PROTOCOL_TOPIC)
         }
 
         CollectProtocol -> (u256, u256) {
