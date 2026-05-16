@@ -1,8 +1,85 @@
 use std::abi::sol::{self, Int24, Uint24}
-use std::evm::{Address, Create, Evm, Log, RawMem}
+use std::evm::{Address, Create, Evm, Log, RawMem, RawStorage}
+use super::libraries::tick_bitmap::int_key
 use super::mock_time_uniswap_v3_pool::MockTimeUniswapV3Pool
 
+const PARAMETERS_FACTORY_SLOT: u256 = 0
+const PARAMETERS_TOKEN0_SLOT: u256 = 1
+const PARAMETERS_TOKEN1_SLOT: u256 = 2
+const PARAMETERS_PACKED_SLOT: u256 = 3
+const MASK_U24: u256 = 0xffffff
+const MIN_I24: i256 = -0x800000
+const MAX_I24: i256 = 0x7fffff
 const POOL_DEPLOYED_TOPIC: u256 = 0xf0d1eeab175eee2e20b8dc452773bf2257b25724b323b42bc6e5b4616233ae1f
+
+fn checked_fee(_ fee: Uint24) -> u32 {
+    assert(fee.val <= MASK_U24.downcast_unchecked())
+    fee.val
+}
+
+fn checked_int24(_ tick_spacing: Int24) -> i32 {
+    let value = tick_spacing.val as i256
+    assert(value >= MIN_I24 && value <= MAX_I24)
+    tick_spacing.val
+}
+
+fn int24_word(_ value: i32) -> u256 {
+    int_key(value as i256) & MASK_U24
+}
+
+fn int24_abi_word(_ value: i32) -> u256 {
+    int_key(value as i256)
+}
+
+fn decode_int24_word(_ word: u256) -> i32 {
+    let value = word & MASK_U24
+    if (value & 0x800000) == 0 {
+        return value.downcast_unchecked()
+    }
+
+    let magnitude = ((MASK_U24 - value) + 1) & MASK_U24
+    let magnitude_i: i32 = magnitude.downcast_unchecked()
+    0 - magnitude_i
+}
+
+fn store_parameters(
+    factory: Address,
+    token0: Address,
+    token1: Address,
+    fee: Uint24,
+    tick_spacing: Int24,
+)
+uses (evm: mut Evm)
+{
+    evm.sstore(slot: PARAMETERS_FACTORY_SLOT, value: factory.inner)
+    evm.sstore(slot: PARAMETERS_TOKEN0_SLOT, value: token0.inner)
+    evm.sstore(slot: PARAMETERS_TOKEN1_SLOT, value: token1.inner)
+    evm.sstore(
+        slot: PARAMETERS_PACKED_SLOT,
+        value: (checked_fee(fee) as u256) | (int24_word(checked_int24(tick_spacing)) << 24),
+    )
+}
+
+fn clear_parameters() uses (evm: mut Evm) {
+    evm.sstore(slot: PARAMETERS_FACTORY_SLOT, value: 0)
+    evm.sstore(slot: PARAMETERS_TOKEN0_SLOT, value: 0)
+    evm.sstore(slot: PARAMETERS_TOKEN1_SLOT, value: 0)
+    evm.sstore(slot: PARAMETERS_PACKED_SLOT, value: 0)
+}
+
+fn pool_salt(token0: Address, token1: Address, fee: Uint24, tick_spacing: Int24) -> u256
+uses (evm: mut Evm)
+{
+    let ptr = std::evm::mem::alloc(0)
+    evm.mstore(addr: ptr, value: token0.inner << 96)
+    evm.mstore(addr: ptr + 20, value: token1.inner << 96)
+    evm.mstore(addr: ptr + 40, value: (checked_fee(fee) as u256) << 232)
+    evm.mstore(
+        addr: ptr + 43,
+        value: int24_word(checked_int24(tick_spacing)) << 232,
+    )
+    evm.keccak256(offset: ptr, len: 46)
+}
 
 fn emit_pool_deployed(_ pool: Address) uses (evm: mut Evm) {
     let ptr = std::evm::mem::alloc(0)
@@ -10,7 +87,23 @@ fn emit_pool_deployed(_ pool: Address) uses (evm: mut Evm) {
     evm.log1(offset: ptr, len: 32, topic0: POOL_DEPLOYED_TOPIC)
 }
 
+fn return_parameters() uses (evm: mut Evm) {
+    let packed = evm.sload(PARAMETERS_PACKED_SLOT)
+    evm.mstore(addr: 0, value: evm.sload(PARAMETERS_FACTORY_SLOT))
+    evm.mstore(addr: 32, value: evm.sload(PARAMETERS_TOKEN0_SLOT))
+    evm.mstore(addr: 64, value: evm.sload(PARAMETERS_TOKEN1_SLOT))
+    evm.mstore(addr: 96, value: packed & MASK_U24)
+    evm.mstore(
+        addr: 128,
+        value: int24_abi_word(decode_int24_word(packed >> 24)),
+    )
+    evm.return_data(offset: 0, len: 160)
+}
+
 msg MockTimeUniswapV3PoolDeployerMsg {
+    #[selector = sol("parameters()")]
+    Parameters,
+
     #[selector = sol("deploy(address,address,address,uint24,int24)")]
     Deploy {
         factory: Address,
@@ -23,15 +116,21 @@ msg MockTimeUniswapV3PoolDeployerMsg {
 
 pub contract MockTimeUniswapV3PoolDeployer uses (evm: mut Evm) {
     recv MockTimeUniswapV3PoolDeployerMsg {
+        Parameters uses (mut evm) {
+            return_parameters()
+        }
+
         Deploy { factory, token0, token1, fee, tickSpacing } -> u256
         uses (mut evm)
         {
+            store_parameters(factory, token0, token1, fee, tick_spacing: tickSpacing)
             let pool = evm
                 .create2<MockTimeUniswapV3Pool>(
                     value: 0,
-                    args: (factory, token0, token1, fee, tickSpacing),
-                    salt: 0,
+                    args: (),
+                    salt: pool_salt(token0, token1, fee, tick_spacing: tickSpacing),
                 )
+            clear_parameters()
             emit_pool_deployed(pool)
             pool.inner
         }

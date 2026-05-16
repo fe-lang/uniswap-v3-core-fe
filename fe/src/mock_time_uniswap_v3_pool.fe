@@ -1,4 +1,3 @@
-use std::abi::sol::{Int24, Uint24}
 use std::evm::{assert_msg, Address, Call, Ctx, Evm, Log, RawMem, RawOps}
 use super::libraries::fixed_point_128::Q128
 use super::libraries::full_math::mul_div
@@ -261,6 +260,29 @@ fn factory_owner(factory: Address) -> u256 uses (call: mut Call, evm: mut Evm) {
     )
     evm.returndatacopy(dest: 0, offset: 0, len: 32)
     evm.mload(0)
+}
+
+fn load_deployer_parameters(deployer: Address) -> (Address, Address, Address, u32, i32)
+uses (call: mut Call, evm: mut Evm)
+{
+    evm.mstore(addr: 0, value: (0x89035730 as u256) << 224)
+    assert(
+        call.raw_call(
+            addr: deployer,
+            gas: evm.gas(),
+            value: 0,
+            args_offset: 0,
+            args_len: 4,
+        ),
+    )
+    evm.returndatacopy(dest: 0, offset: 0, len: 160)
+    (
+        Address { inner: evm.mload(0) },
+        Address { inner: evm.mload(32) },
+        Address { inner: evm.mload(64) },
+        evm.mload(96).downcast_unchecked(),
+        decode_int24_word(evm.mload(128)).downcast_unchecked(),
+    )
 }
 
 fn transfer_scratch(token: Address, to: Address, value: u256)
@@ -550,17 +572,18 @@ uses (evm: mut Evm)
 pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
     mut store: MockTimePoolStore,
 
-    init(factory: Address, token0: Address, token1: Address, fee: Uint24, tick_spacing: Int24)
-    uses (mut store)
+    init()
+    uses (ctx, mut call, mut evm, mut store)
     {
+        let (factory, token0, token1, fee, tick_spacing) = load_deployer_parameters(
+            deployer: ctx.caller(),
+        )
         store.factory = factory
         store.token0 = token0
         store.token1 = token1
-        store.fee = fee.val
-        store.tick_spacing = tick_spacing.val
-        store.max_liquidity_per_tick = tick_spacing_to_max_liquidity_per_tick(
-            tick_spacing.val as i256,
-        )
+        store.fee = fee
+        store.tick_spacing = tick_spacing
+        store.max_liquidity_per_tick = tick_spacing_to_max_liquidity_per_tick(tick_spacing as i256)
         store.time = TEST_POOL_START_TIME
     }
 

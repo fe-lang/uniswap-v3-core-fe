@@ -484,6 +484,19 @@ const abiOverrides = {
     },
     {
       type: 'function',
+      name: 'parameters',
+      inputs: [],
+      outputs: [
+        { name: 'factory', type: 'address' },
+        { name: 'token0', type: 'address' },
+        { name: 'token1', type: 'address' },
+        { name: 'fee', type: 'uint24' },
+        { name: 'tickSpacing', type: 'int24' },
+      ],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
       name: 'deploy',
       inputs: [
         { name: 'factory', type: 'address' },
@@ -499,13 +512,7 @@ const abiOverrides = {
   MockTimeUniswapV3Pool: [
     {
       type: 'constructor',
-      inputs: [
-        { name: 'factory', type: 'address' },
-        { name: 'token0', type: 'address' },
-        { name: 'token1', type: 'address' },
-        { name: 'fee', type: 'uint24' },
-        { name: 'tickSpacing', type: 'int24' },
-      ],
+      inputs: [],
       stateMutability: 'nonpayable',
     },
     {

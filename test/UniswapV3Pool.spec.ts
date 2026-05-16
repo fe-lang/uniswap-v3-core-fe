@@ -1,8 +1,9 @@
 import { ethers, waffle } from 'hardhat'
-import { BigNumber, BigNumberish, constants, Wallet } from 'ethers'
+import { BigNumber, BigNumberish, constants, utils, Wallet } from 'ethers'
 import { TestERC20 } from '../typechain/TestERC20'
 import { UniswapV3Factory } from '../typechain/UniswapV3Factory'
 import { MockTimeUniswapV3Pool } from '../typechain/MockTimeUniswapV3Pool'
+import { MockTimeUniswapV3PoolDeployer } from '../typechain/MockTimeUniswapV3PoolDeployer'
 import { TestUniswapV3SwapPay } from '../typechain/TestUniswapV3SwapPay'
 import checkObservationEquals from './shared/checkObservationEquals'
 import { expect } from './shared/expect'
@@ -34,6 +35,7 @@ import { TickMathTest } from '../typechain/TickMathTest'
 import { SwapMathTest } from '../typechain/SwapMathTest'
 
 const createFixtureLoader = waffle.createFixtureLoader
+const usingFeArtifacts = process.env.FE_ARTIFACTS === '1'
 
 type ThenArg<T> = T extends PromiseLike<infer U> ? U : T
 
@@ -110,6 +112,36 @@ describe('UniswapV3Pool', () => {
     expect(await pool.token0()).to.eq(token0.address)
     expect(await pool.token1()).to.eq(token1.address)
     expect(await pool.maxLiquidityPerTick()).to.eq(getMaxLiquidityPerTick(tickSpacing))
+  })
+
+  it('mock deployer clears transient parameters', async () => {
+    const MockTimeUniswapV3PoolDeployerFactory = await getContractFactory('MockTimeUniswapV3PoolDeployer')
+    const MockTimeUniswapV3PoolFactory = await getContractFactory('MockTimeUniswapV3Pool')
+    const deployer = (await MockTimeUniswapV3PoolDeployerFactory.deploy()) as MockTimeUniswapV3PoolDeployer
+    const salt = utils.keccak256(
+      utils.solidityPack(['address', 'address', 'uint24', 'int24'], [token0.address, token1.address, feeAmount, tickSpacing])
+    )
+    const expectedAddress = utils.getCreate2Address(
+      deployer.address,
+      salt,
+      utils.keccak256(MockTimeUniswapV3PoolFactory.bytecode)
+    )
+
+    const tx = await deployer.deploy(factory.address, token0.address, token1.address, feeAmount, tickSpacing)
+    const receipt = await tx.wait()
+    const poolAddress = receipt.events?.[0].args?.pool as string
+
+    if (!usingFeArtifacts) expect(poolAddress).to.eq(expectedAddress)
+    const params = await deployer.parameters()
+    expect(params.factory).to.eq(constants.AddressZero)
+    expect(params.token0).to.eq(constants.AddressZero)
+    expect(params.token1).to.eq(constants.AddressZero)
+    expect(params.fee).to.eq(0)
+    expect(params.tickSpacing).to.eq(0)
+    const deployedPool = MockTimeUniswapV3PoolFactory.attach(poolAddress) as MockTimeUniswapV3Pool
+    expect(await deployedPool.factory()).to.eq(factory.address)
+    expect(await deployedPool.token0()).to.eq(token0.address)
+    expect(await deployedPool.token1()).to.eq(token1.address)
   })
 
   describe('#initialize', () => {
