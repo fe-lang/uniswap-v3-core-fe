@@ -153,6 +153,8 @@ struct MockTimePoolStore {
     liquidity: u128,
     fee_growth_global0_x128: u256,
     fee_growth_global1_x128: u256,
+    protocol_fee0: u128,
+    protocol_fee1: u128,
 }
 
 fn int24_abi_word(_ value: i32) -> u256 {
@@ -574,8 +576,8 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             store.liquidity
         }
 
-        ProtocolFees -> (u128, u128) {
-            (0, 0)
+        ProtocolFees -> (u128, u128) uses (store) {
+            (store.protocol_fee0, store.protocol_fee1)
         }
 
         SnapshotCumulativesInside uses (mut evm, store) {
@@ -698,16 +700,34 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             flash_callback(caller: ctx.caller(), fee0, fee1, data_start)
             let paid0 = sub_u256(a: pay0, b: amount0)
             let paid1 = sub_u256(a: pay1, b: amount1)
-            if paid0 > 0 && (store.fee_protocol & 0x0f) == 0 {
+            if paid0 > 0 {
+                let feeProtocol0 = store.fee_protocol & 0x0f
+                let fees0 = if feeProtocol0 == 0 {
+                    0
+                } else {
+                    paid0 / (feeProtocol0 as u256)
+                }
+                if fees0 > 0 {
+                    store.protocol_fee0 += fees0.downcast_unchecked()
+                }
                 store.fee_growth_global0_x128 = add_u256(
                     a: store.fee_growth_global0_x128,
-                    b: (paid0 * Q128) / (store.liquidity as u256),
+                    b: ((paid0 - fees0) * Q128) / (store.liquidity as u256),
                 )
             }
-            if paid1 > 0 && (store.fee_protocol >> 4) == 0 {
+            if paid1 > 0 {
+                let feeProtocol1 = store.fee_protocol >> 4
+                let fees1 = if feeProtocol1 == 0 {
+                    0
+                } else {
+                    paid1 / (feeProtocol1 as u256)
+                }
+                if fees1 > 0 {
+                    store.protocol_fee1 += fees1.downcast_unchecked()
+                }
                 store.fee_growth_global1_x128 = add_u256(
                     a: store.fee_growth_global1_x128,
-                    b: (paid1 * Q128) / (store.liquidity as u256),
+                    b: ((paid1 - fees1) * Q128) / (store.liquidity as u256),
                 )
             }
             emit_flash(
