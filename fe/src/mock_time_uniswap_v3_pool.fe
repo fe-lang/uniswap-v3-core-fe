@@ -1,4 +1,4 @@
-use std::evm::{assert_msg, Address, Call, Ctx, Evm, Log, RawMem, RawOps}
+use std::evm::{Address, Call, Ctx, Evm, Log, RawMem, RawOps}
 use super::libraries::fixed_point_128::Q128
 use super::libraries::full_math::mul_div
 use super::libraries::liquidity_math::add_delta
@@ -32,6 +32,17 @@ const SET_FEE_PROTOCOL_TOPIC: u256 = 0x973d8d92bb299f4af6ce49b52a8adb85ae46b9f21
 const FLASH_TOPIC: u256 = 0xbdbdb71d7860376ba52b25a5028beea23581364a40522f6bcfb86bb1f2dca633
 const FLASH_CALLBACK_SELECTOR: u256 = 0xe9cbafb0
 const SWAP_CALLBACK_SELECTOR: u256 = 0xfa461e33
+const ERROR_STRING_SELECTOR_WORD: u256 = 0x08c379a000000000000000000000000000000000000000000000000000000000
+const MSG_TLU: u256 = 0x544c550000000000000000000000000000000000000000000000000000000000
+const MSG_TLM: u256 = 0x544c4d0000000000000000000000000000000000000000000000000000000000
+const MSG_TUM: u256 = 0x54554d0000000000000000000000000000000000000000000000000000000000
+const MSG_LOK: u256 = 0x4c4f4b0000000000000000000000000000000000000000000000000000000000
+const MSG_L: u256 = 0x4c00000000000000000000000000000000000000000000000000000000000000
+const MSG_R: u256 = 0x5200000000000000000000000000000000000000000000000000000000000000
+const MSG_AS: u256 = 0x4153000000000000000000000000000000000000000000000000000000000000
+const MSG_IIA: u256 = 0x4949410000000000000000000000000000000000000000000000000000000000
+const MSG_M0: u256 = 0x4d30000000000000000000000000000000000000000000000000000000000000
+const MSG_M1: u256 = 0x4d31000000000000000000000000000000000000000000000000000000000000
 
 msg MockTimeUniswapV3PoolMsg {
     #[selector = 0xc45a0155]
@@ -165,14 +176,39 @@ fn decode_int24_word(_ word: u256) -> i256 {
     0 - magnitude_i
 }
 
-fn check_ticks(tick_lower: i256, tick_upper: i256) {
-    assert_msg(tick_lower < tick_upper, "TLU")
-    assert_msg(tick_lower >= MIN_TICK, "TLM")
-    assert_msg(tick_upper <= MAX_TICK, "TUM")
+fn require_msg(_ evm: mut Evm, condition: bool, code: u256, len: u256) {
+    if !condition {
+        evm.mstore(addr: 0, value: ERROR_STRING_SELECTOR_WORD)
+        evm.mstore(addr: 4, value: 32)
+        evm.mstore(addr: 36, value: len)
+        evm.mstore(addr: 68, value: code)
+        evm.revert(offset: 0, len: 100)
+    }
 }
 
-fn check_unlocked(_ unlocked: bool) {
-    assert_msg(unlocked, "LOK")
+fn check_ticks(_ evm: mut Evm, tick_lower: i256, tick_upper: i256) {
+    require_msg(
+        mut evm,
+        condition: tick_lower < tick_upper,
+        code: MSG_TLU,
+        len: 3,
+    )
+    require_msg(
+        mut evm,
+        condition: tick_lower >= MIN_TICK,
+        code: MSG_TLM,
+        len: 3,
+    )
+    require_msg(
+        mut evm,
+        condition: tick_upper <= MAX_TICK,
+        code: MSG_TUM,
+        len: 3,
+    )
+}
+
+fn check_unlocked(_ evm: mut Evm, _ unlocked: bool) {
+    require_msg(mut evm, condition: unlocked, code: MSG_LOK, len: 3)
 }
 
 fn current_tick_cumulative(tick_cumulative: i64, tick_current: i32, time_delta: u32) -> i256 {
@@ -645,9 +681,11 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
         Initialize uses (mut store, mut evm) {
             let sqrt_price_x96 = evm.calldataload(4)
             assert(store.sqrt_price_x96 == 0)
-            assert_msg(
-                sqrt_price_x96 >= min_sqrt_ratio() && sqrt_price_x96 < max_sqrt_ratio(),
-                "R",
+            require_msg(
+                mut evm,
+                condition: sqrt_price_x96 >= min_sqrt_ratio() && sqrt_price_x96 < max_sqrt_ratio(),
+                code: MSG_R,
+                len: 1,
             )
             let tick: i32 = get_tick_at_sqrt_ratio(sqrt_price_x96).downcast_unchecked()
             store.sqrt_price_x96 = sqrt_price_x96
@@ -666,7 +704,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             let word = evm.calldataload(4)
             assert(word <= 0xffff)
             let observation_cardinality_next: u16 = word.downcast_unchecked()
-            check_unlocked(store.unlocked)
+            check_unlocked(mut evm, store.unlocked)
             store.unlocked = false
             let old = store.observation_cardinality_next
             let new = if observation_cardinality_next > old {
@@ -719,7 +757,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
         SnapshotCumulativesInside uses (mut evm, store) {
             let lower = decode_int24_word(evm.calldataload(4))
             let upper = decode_int24_word(evm.calldataload(36))
-            check_ticks(tick_lower: lower, tick_upper: upper)
+            check_ticks(mut evm, tick_lower: lower, tick_upper: upper)
 
             let (
                 _,
@@ -811,7 +849,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
         }
 
         SetFeeProtocol uses (ctx, mut call, mut evm, mut store) {
-            check_unlocked(store.unlocked)
+            check_unlocked(mut evm, store.unlocked)
             store.unlocked = false
             assert(evm.calldatasize() >= 68)
             let fee0_word = evm.calldataload(4)
@@ -839,7 +877,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
         }
 
         CollectProtocol uses (ctx, mut call, mut evm, mut store) {
-            check_unlocked(store.unlocked)
+            check_unlocked(mut evm, store.unlocked)
             store.unlocked = false
             assert(
                 ctx.caller().inner == factory_owner(factory: store.factory),
@@ -880,8 +918,13 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
         }
 
         Flash uses (ctx, mut call, mut evm, mut store) {
-            check_unlocked(store.unlocked)
-            assert_msg(store.liquidity != 0, "L")
+            check_unlocked(mut evm, store.unlocked)
+            require_msg(
+                mut evm,
+                condition: store.liquidity != 0,
+                code: MSG_L,
+                len: 1,
+            )
             let recipient = Address { inner: evm.calldataload(4) }
             let amount0 = evm.calldataload(36)
             let amount1 = evm.calldataload(68)
@@ -941,13 +984,18 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
         }
 
         Swap uses (ctx, mut call, mut evm, mut store) {
-            check_unlocked(store.unlocked)
+            check_unlocked(mut evm, store.unlocked)
             let zero_for_one = evm.calldataload(36) != 0
             let amount_specified = evm.calldataload(68)
             let data_offset = evm.calldataload(132)
             let data_start = 4 + data_offset
             let data_len = evm.calldataload(data_start)
-            assert_msg(amount_specified != 0, "AS")
+            require_msg(
+                mut evm,
+                condition: amount_specified != 0,
+                code: MSG_AS,
+                len: 2,
+            )
             if data_len == 0 {
                 store.unlocked = false
                 evm.mstore(addr: 0, value: SWAP_CALLBACK_SELECTOR << 224)
@@ -997,7 +1045,12 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                     ),
                 )
                 let balance_after = balance_of(token: input_token, account: ctx.address())
-                assert_msg(balance_before + amount_specified <= balance_after, "IIA")
+                require_msg(
+                    mut evm,
+                    condition: balance_before + amount_specified <= balance_after,
+                    code: MSG_IIA,
+                    len: 3,
+                )
 
                 let fee_amount = mul_div(amount_specified, store.fee as u256, denominator: 1000000)
                 let fee_protocol = if zero_for_one {
@@ -1039,9 +1092,9 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             let pay0 = evm.calldataload(data_start + 64)
             let pay1 = evm.calldataload(data_start + 96)
             if zero_for_one {
-                assert_msg(pay0 >= 1000, "IIA")
+                require_msg(mut evm, condition: pay0 >= 1000, code: MSG_IIA, len: 3)
             } else {
-                assert_msg(pay1 >= 1000, "IIA")
+                require_msg(mut evm, condition: pay1 >= 1000, code: MSG_IIA, len: 3)
             }
         }
 
@@ -1114,7 +1167,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             let tick_lower = decode_int24_word(evm.calldataload(36))
             let tick_upper = decode_int24_word(evm.calldataload(68))
             let liquidity_delta = decode_i128_word(evm.calldataload(100))
-            check_ticks(tick_lower, tick_upper: tick_upper)
+            check_ticks(mut evm, tick_lower, tick_upper: tick_upper)
 
             let current_time: u32 = store.time.downcast_unchecked()
             let time_delta = current_time - store.observation0_block_timestamp
@@ -1279,7 +1332,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
         }
 
         Mint uses (ctx, mut call, mut evm, mut store) {
-            check_unlocked(store.unlocked)
+            check_unlocked(mut evm, store.unlocked)
             store.unlocked = false
 
             let recipient = Address { inner: evm.calldataload(4) }
@@ -1312,11 +1365,21 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
 
             if amount0 > 0 {
                 let balance0_after: u256 = balance_of(token: store.token0, account: ctx.address())
-                assert_msg(balance0_before + amount0 <= balance0_after, "M0")
+                require_msg(
+                    mut evm,
+                    condition: balance0_before + amount0 <= balance0_after,
+                    code: MSG_M0,
+                    len: 2,
+                )
             }
             if amount1 > 0 {
                 let balance1_after: u256 = balance_of(token: store.token1, account: ctx.address())
-                assert_msg(balance1_before + amount1 <= balance1_after, "M1")
+                require_msg(
+                    mut evm,
+                    condition: balance1_before + amount1 <= balance1_after,
+                    code: MSG_M1,
+                    len: 2,
+                )
             }
 
             store.unlocked = true
@@ -1333,7 +1396,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
         }
 
         Burn uses (ctx, mut call, mut evm, mut store) {
-            assert_msg(store.unlocked, "LOK")
+            check_unlocked(mut evm, store.unlocked)
             store.unlocked = false
 
             let tick_lower = decode_int24_word(evm.calldataload(4)).downcast_unchecked()
@@ -1361,7 +1424,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
         }
 
         Collect uses (ctx, mut evm, mut store) {
-            check_unlocked(store.unlocked)
+            check_unlocked(mut evm, store.unlocked)
             store.unlocked = false
 
             let recipient = Address { inner: evm.calldataload(4) }
