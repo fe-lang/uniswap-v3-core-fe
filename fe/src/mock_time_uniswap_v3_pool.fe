@@ -1,4 +1,4 @@
-use std::abi::sol::{self, Bytes32, Int24, Uint24, Uint160}
+use std::abi::sol::{self, Int24, Uint24, Uint160}
 use std::evm::{assert_msg, Address, Call, Ctx, Evm, Log, RawMem, RawOps}
 use super::libraries::fixed_point_128::Q128
 use super::libraries::liquidity_math::add_delta
@@ -52,11 +52,11 @@ msg MockTimeUniswapV3PoolMsg {
     #[selector = sol("maxLiquidityPerTick()")]
     MaxLiquidityPerTick -> u128,
 
-    #[selector = sol("slot0()")]
-    Slot0 -> (u256, i32, u16, u16, u16, u8, bool),
+    #[selector = 0x3850c7bd]
+    Slot0,
 
     #[selector = 0x252c09d7]
-    Observations -> (u32, i64, u256, bool),
+    Observations,
 
     #[selector = sol("initialize(uint160)")]
     Initialize { sqrtPriceX96: Uint160 },
@@ -82,8 +82,8 @@ msg MockTimeUniswapV3PoolMsg {
     #[selector = sol("liquidity()")]
     Liquidity -> u128,
 
-    #[selector = sol("protocolFees()")]
-    ProtocolFees -> (u128, u128),
+    #[selector = 0x1ad8b03b]
+    ProtocolFees,
 
     #[selector = 0xa38807f2]
     SnapshotCumulativesInside,
@@ -463,6 +463,42 @@ fn return_pair(amount0: u256, amount1: u256) -> ! uses (evm: mut Evm) {
     evm.return_data(offset: 0, len: 64)
 }
 
+fn return_slot0(
+    sqrt_price_x96: u256,
+    tick: i32,
+    observation_index: u16,
+    observation_cardinality: u16,
+    observation_cardinality_next: u16,
+    fee_protocol: u8,
+    unlocked: bool,
+) -> !
+uses (evm: mut Evm)
+{
+    evm.mstore(addr: 0, value: sqrt_price_x96)
+    evm.mstore(addr: 32, value: int_key(tick as i256))
+    evm.mstore(addr: 64, value: observation_index as u256)
+    evm.mstore(addr: 96, value: observation_cardinality as u256)
+    evm.mstore(addr: 128, value: observation_cardinality_next as u256)
+    evm.mstore(addr: 160, value: fee_protocol as u256)
+    evm.mstore(addr: 192, value: if unlocked { 1 } else { 0 })
+    evm.return_data(offset: 0, len: 224)
+}
+
+fn return_observation(
+    block_timestamp: u32,
+    tick_cumulative: i64,
+    seconds_per_liquidity_cumulative_x128: u256,
+    initialized: bool,
+) -> !
+uses (evm: mut Evm)
+{
+    evm.mstore(addr: 0, value: block_timestamp as u256)
+    evm.mstore(addr: 32, value: int_key(tick_cumulative as i256))
+    evm.mstore(addr: 64, value: seconds_per_liquidity_cumulative_x128)
+    evm.mstore(addr: 96, value: if initialized { 1 } else { 0 })
+    evm.return_data(offset: 0, len: 128)
+}
+
 fn return_tick_info(
     liquidity_gross: u128,
     liquidity_net: i128,
@@ -545,26 +581,25 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             store.max_liquidity_per_tick
         }
 
-        Slot0 -> (u256, i32, u16, u16, u16, u8, bool)
-        uses (store)
-        {
-            (
-                store.sqrt_price_x96,
-                store.tick,
-                store.observation_index,
-                store.observation_cardinality,
-                store.observation_cardinality_next,
-                store.fee_protocol,
-                store.unlocked,
+        Slot0 uses (store, mut evm) {
+            return_slot0(
+                sqrt_price_x96: store.sqrt_price_x96,
+                tick: store.tick,
+                observation_index: store.observation_index,
+                observation_cardinality: store.observation_cardinality,
+                observation_cardinality_next: store.observation_cardinality_next,
+                fee_protocol: store.fee_protocol,
+                unlocked: store.unlocked,
             )
         }
 
-        Observations -> (u32, i64, u256, bool) uses (store) {
-            (
-                store.observation0_block_timestamp,
-                store.observation0_tick_cumulative,
-                store.observation0_seconds_per_liquidity_cumulative_x128,
-                true,
+        Observations uses (store, mut evm) {
+            return_observation(
+                block_timestamp: store.observation0_block_timestamp,
+                tick_cumulative: store.observation0_tick_cumulative,
+                seconds_per_liquidity_cumulative_x128: store
+                    .observation0_seconds_per_liquidity_cumulative_x128,
+                initialized: true,
             )
         }
 
@@ -630,8 +665,11 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             store.liquidity
         }
 
-        ProtocolFees -> (u128, u128) uses (store) {
-            (store.protocol_fee0, store.protocol_fee1)
+        ProtocolFees uses (store, mut evm) {
+            return_pair(
+                amount0: store.protocol_fee0 as u256,
+                amount1: store.protocol_fee1 as u256,
+            )
         }
 
         SnapshotCumulativesInside uses (mut evm, store) {
