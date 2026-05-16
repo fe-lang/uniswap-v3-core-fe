@@ -144,6 +144,19 @@ describe('UniswapV3Pool', () => {
     expect(await deployedPool.token1()).to.eq(token1.address)
   })
 
+  it('mock time and uninitialized observations match defaults', async () => {
+    expect(await pool.time()).to.eq(TEST_POOL_START_TIME)
+    checkObservationEquals(await pool.observations(1), {
+      blockTimestamp: 0,
+      tickCumulative: 0,
+      secondsPerLiquidityCumulativeX128: 0,
+      initialized: false,
+    })
+
+    await pool.advanceTime(7)
+    expect(await pool.time()).to.eq(TEST_POOL_START_TIME + 7)
+  })
+
   describe('#initialize', () => {
     it('fails if already initialized', async () => {
       await pool.initialize(encodePriceSqrt(1, 1))

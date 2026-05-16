@@ -67,6 +67,9 @@ msg MockTimeUniswapV3PoolMsg {
     #[selector = 0x07e32f0a]
     AdvanceTime,
 
+    #[selector = 0x16ada547]
+    Time,
+
     #[selector = 0xd380c679]
     SetFeeGrowthGlobal0X128,
 
@@ -625,12 +628,20 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
         }
 
         Observations uses (store, mut evm) {
+            if evm.calldataload(4) == 0 {
+                return_observation(
+                    block_timestamp: store.observation0_block_timestamp,
+                    tick_cumulative: store.observation0_tick_cumulative,
+                    seconds_per_liquidity_cumulative_x128: store
+                        .observation0_seconds_per_liquidity_cumulative_x128,
+                    initialized: true,
+                )
+            }
             return_observation(
-                block_timestamp: store.observation0_block_timestamp,
-                tick_cumulative: store.observation0_tick_cumulative,
-                seconds_per_liquidity_cumulative_x128: store
-                    .observation0_seconds_per_liquidity_cumulative_x128,
-                initialized: true,
+                block_timestamp: 0,
+                tick_cumulative: 0,
+                seconds_per_liquidity_cumulative_x128: 0,
+                initialized: false,
             )
         }
 
@@ -675,6 +686,10 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
 
         AdvanceTime uses (mut store, mut evm) {
             store.time += evm.calldataload(4)
+        }
+
+        Time uses (store, mut evm) {
+            return_word(value: store.time)
         }
 
         SetFeeGrowthGlobal0X128 uses (mut store, mut evm) {

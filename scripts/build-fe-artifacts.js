@@ -702,6 +702,13 @@ const abiOverrides = {
     },
     {
       type: 'function',
+      name: 'time',
+      inputs: [],
+      outputs: [{ name: '', type: 'uint256' }],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
       name: 'setFeeGrowthGlobal0X128',
       inputs: [{ name: '_feeGrowthGlobal0X128', type: 'uint256' }],
       outputs: [],
