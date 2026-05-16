@@ -195,6 +195,11 @@ fn min_u128(_ a: u128, _ b: u128) -> u128 {
 }
 
 #[arithmetic(unchecked)]
+fn add_u256(a: u256, b: u256) -> u256 {
+    a + b
+}
+
+#[arithmetic(unchecked)]
 fn sub_u256(a: u256, b: u256) -> u256 {
     a - b
 }
@@ -665,10 +670,16 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             let paid0 = sub_u256(a: pay0, b: amount0)
             let paid1 = sub_u256(a: pay1, b: amount1)
             if paid0 > 0 && (store.fee_protocol & 0x0f) == 0 {
-                store.fee_growth_global0_x128 += (paid0 * Q128) / (store.liquidity as u256)
+                store.fee_growth_global0_x128 = add_u256(
+                    a: store.fee_growth_global0_x128,
+                    b: (paid0 * Q128) / (store.liquidity as u256),
+                )
             }
             if paid1 > 0 && (store.fee_protocol >> 4) == 0 {
-                store.fee_growth_global1_x128 += (paid1 * Q128) / (store.liquidity as u256)
+                store.fee_growth_global1_x128 = add_u256(
+                    a: store.fee_growth_global1_x128,
+                    b: (paid1 * Q128) / (store.liquidity as u256),
+                )
             }
             emit_flash(
                 sender: ctx.caller(),
