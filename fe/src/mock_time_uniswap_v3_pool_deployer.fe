@@ -8,20 +8,7 @@ const PARAMETERS_TOKEN0_SLOT: u256 = 1
 const PARAMETERS_TOKEN1_SLOT: u256 = 2
 const PARAMETERS_PACKED_SLOT: u256 = 3
 const MASK_U24: u256 = 0xffffff
-const MIN_I24: i256 = -0x800000
-const MAX_I24: i256 = 0x7fffff
 const POOL_DEPLOYED_TOPIC: u256 = 0xf0d1eeab175eee2e20b8dc452773bf2257b25724b323b42bc6e5b4616233ae1f
-
-fn checked_fee(_ fee: Uint24) -> u32 {
-    assert(fee.val <= MASK_U24.downcast_unchecked())
-    fee.val
-}
-
-fn checked_int24(_ tick_spacing: Int24) -> i32 {
-    let value = tick_spacing.val as i256
-    assert(value >= MIN_I24 && value <= MAX_I24)
-    tick_spacing.val
-}
 
 fn int24_word(_ value: i32) -> u256 {
     int_key(value as i256) & MASK_U24
@@ -56,7 +43,7 @@ uses (evm: mut Evm)
     evm.sstore(slot: PARAMETERS_TOKEN1_SLOT, value: token1.inner)
     evm.sstore(
         slot: PARAMETERS_PACKED_SLOT,
-        value: (checked_fee(fee) as u256) | (int24_word(checked_int24(tick_spacing)) << 24),
+        value: (fee.val as u256) | (int24_word(tick_spacing.val) << 24),
     )
 }
 
@@ -73,11 +60,8 @@ uses (evm: mut Evm)
     let ptr = std::evm::mem::alloc(0)
     evm.mstore(addr: ptr, value: token0.inner << 96)
     evm.mstore(addr: ptr + 20, value: token1.inner << 96)
-    evm.mstore(addr: ptr + 40, value: (checked_fee(fee) as u256) << 232)
-    evm.mstore(
-        addr: ptr + 43,
-        value: int24_word(checked_int24(tick_spacing)) << 232,
-    )
+    evm.mstore(addr: ptr + 40, value: (fee.val as u256) << 232)
+    evm.mstore(addr: ptr + 43, value: int24_word(tick_spacing.val) << 232)
     evm.keccak256(offset: ptr, len: 46)
 }
 
