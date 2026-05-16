@@ -68,3 +68,67 @@ pub contract FullMathTest {
         }
     }
 }
+
+msg FullMathEchidnaTestMsg {
+    #[selector = sol("checkMulDivRounding(uint256,uint256,uint256)")]
+    CheckMulDivRounding { x: u256, y: u256, d: u256 },
+
+    #[selector = sol("checkMulDiv(uint256,uint256,uint256)")]
+    CheckMulDiv { x: u256, y: u256, d: u256 },
+
+    #[selector = sol("checkMulDivRoundingUp(uint256,uint256,uint256)")]
+    CheckMulDivRoundingUp { x: u256, y: u256, d: u256 },
+}
+
+pub contract FullMathEchidnaTest {
+    recv FullMathEchidnaTestMsg {
+        CheckMulDivRounding { x, y, d } {
+            assert(d > 0)
+
+            let ceiled = mul_div_rounding_up(x, y, denominator: d)
+            let floored = mul_div(x, y, denominator: d)
+
+            if mulmod(x, y, d) > 0 {
+                assert(ceiled - floored == 1)
+            } else {
+                assert(ceiled == floored)
+            }
+        }
+
+        CheckMulDiv { x, y, d } {
+            assert(d > 0)
+
+            let z = mul_div(x, y, denominator: d)
+            if x == 0 || y == 0 {
+                assert(z == 0)
+                return
+            }
+
+            let x2 = mul_div(z, d, denominator: y)
+            let y2 = mul_div(z, d, denominator: x)
+            assert(x2 <= x)
+            assert(y2 <= y)
+
+            assert(x - x2 < d)
+            assert(y - y2 < d)
+        }
+
+        CheckMulDivRoundingUp { x, y, d } {
+            assert(d > 0)
+
+            let z = mul_div_rounding_up(x, y, denominator: d)
+            if x == 0 || y == 0 {
+                assert(z == 0)
+                return
+            }
+
+            let x2 = mul_div(z, d, denominator: y)
+            let y2 = mul_div(z, d, denominator: x)
+            assert(x2 >= x)
+            assert(y2 >= y)
+
+            assert(x2 - x < d)
+            assert(y2 - y < d)
+        }
+    }
+}
