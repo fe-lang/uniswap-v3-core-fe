@@ -229,14 +229,6 @@ fn sub_u32(a: u32, b: u32) -> u32 {
     a - b
 }
 
-fn copy_words(dest: u256, src: u256, len: u256) uses (evm: mut Evm) {
-    let mut offset: u256 = 0
-    while offset < len {
-        evm.mstore(addr: dest + offset, value: evm.mload(src + offset))
-        offset += 32
-    }
-}
-
 fn balance_of(token: Address, account: Address) -> u256
 uses (call: mut Call, evm: mut Evm)
 {
@@ -1152,10 +1144,12 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 liquidity_delta.downcast_unchecked()
             }
             let round_up = liquidity_delta > 0
+            let sqrt_ratio_lower_x96 = get_sqrt_ratio_at_tick(tick: tick_lower)
+            let sqrt_ratio_upper_x96 = get_sqrt_ratio_at_tick(tick: tick_upper)
             let amount0 = if tick_current_i < tick_lower {
                 get_amount0_delta(
-                    sqrt_ratio_a_x96: get_sqrt_ratio_at_tick(tick: tick_lower),
-                    sqrt_ratio_b_x96: get_sqrt_ratio_at_tick(tick: tick_upper),
+                    sqrt_ratio_a_x96: sqrt_ratio_lower_x96,
+                    sqrt_ratio_b_x96: sqrt_ratio_upper_x96,
                     amount,
                     round_up,
                 )
@@ -1173,15 +1167,15 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 0
             } else if tick_current_i < tick_upper {
                 get_amount1_delta(
-                    sqrt_ratio_a_x96: get_sqrt_ratio_at_tick(tick: tick_lower),
+                    sqrt_ratio_a_x96: sqrt_ratio_lower_x96,
                     sqrt_ratio_b_x96: store.sqrt_price_x96,
                     amount,
                     round_up,
                 )
             } else {
                 get_amount1_delta(
-                    sqrt_ratio_a_x96: get_sqrt_ratio_at_tick(tick: tick_lower),
-                    sqrt_ratio_b_x96: get_sqrt_ratio_at_tick(tick: tick_upper),
+                    sqrt_ratio_a_x96: sqrt_ratio_lower_x96,
+                    sqrt_ratio_b_x96: sqrt_ratio_upper_x96,
                     amount,
                     round_up,
                 )
