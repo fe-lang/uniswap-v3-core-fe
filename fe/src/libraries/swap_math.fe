@@ -1,3 +1,4 @@
+use std::abi::sol::{self, Uint24, Uint160}
 use std::evm::Evm
 use super::full_math::{mul_div, mul_div_rounding_up}
 use super::sqrt_price_math::{
@@ -10,6 +11,16 @@ use super::sqrt_price_math::{
 const FEE_DENOMINATOR: u256 = 1000000
 const MAX_U24: u256 = 0xffffff
 const MAX_U160: u256 = 0xffffffffffffffffffffffffffffffffffffffff
+const U256_MAX: u256 = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+
+#[arithmetic(unchecked)]
+fn abs_i256(_ value: i256) -> u256 {
+    if value < 0 {
+        return (0 - value).downcast_unchecked()
+    }
+
+    value.downcast_unchecked()
+}
 
 #[arithmetic(unchecked)]
 pub fn compute_swap_step(
@@ -214,6 +225,77 @@ pub contract SwapMathTest uses (evm: Evm) {
                 fee_pips: feePips,
             )
             gas_before - evm.gas()
+        }
+    }
+}
+
+msg SwapMathEchidnaTestMsg {
+    #[selector = sol(
+        "checkComputeSwapStepInvariants(uint160,uint160,uint128,int256,uint24)",
+    )]
+    CheckComputeSwapStepInvariants {
+        sqrtPriceRaw: Uint160,
+        sqrtPriceTargetRaw: Uint160,
+        liquidity: u128,
+        amountRemaining: i256,
+        feePips: Uint24,
+    },
+}
+
+pub contract SwapMathEchidnaTest {
+    recv SwapMathEchidnaTestMsg {
+        CheckComputeSwapStepInvariants {
+            sqrtPriceRaw,
+            sqrtPriceTargetRaw,
+            liquidity,
+            amountRemaining,
+            feePips,
+        } {
+            let fee_pips = feePips.val as u256
+            assert(sqrtPriceRaw.val > 0)
+            assert(sqrtPriceTargetRaw.val > 0)
+            assert(fee_pips > 0)
+            assert(fee_pips < FEE_DENOMINATOR)
+
+            let (sqrt_q, amount_in, amount_out, fee_amount) = compute_swap_step(
+                sqrt_ratio_current_x96: sqrtPriceRaw.val,
+                sqrt_ratio_target_x96: sqrtPriceTargetRaw.val,
+                liquidity,
+                amount_remaining: amountRemaining,
+                fee_pips,
+            )
+            let amount_remaining_abs = abs_i256(amountRemaining)
+
+            assert(amount_in <= U256_MAX - fee_amount)
+
+            if amountRemaining < 0 {
+                assert(amount_out <= amount_remaining_abs)
+            } else {
+                assert(amount_in + fee_amount <= amount_remaining_abs)
+            }
+
+            if sqrtPriceRaw.val == sqrtPriceTargetRaw.val {
+                assert(amount_in == 0)
+                assert(amount_out == 0)
+                assert(fee_amount == 0)
+                assert(sqrt_q == sqrtPriceTargetRaw.val)
+            }
+
+            if sqrt_q != sqrtPriceTargetRaw.val {
+                if amountRemaining < 0 {
+                    assert(amount_out == amount_remaining_abs)
+                } else {
+                    assert(amount_in + fee_amount == amount_remaining_abs)
+                }
+            }
+
+            if sqrtPriceTargetRaw.val <= sqrtPriceRaw.val {
+                assert(sqrt_q <= sqrtPriceRaw.val)
+                assert(sqrt_q >= sqrtPriceTargetRaw.val)
+            } else {
+                assert(sqrt_q >= sqrtPriceRaw.val)
+                assert(sqrt_q <= sqrtPriceTargetRaw.val)
+            }
         }
     }
 }
