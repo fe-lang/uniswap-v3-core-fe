@@ -1,6 +1,5 @@
-use std::evm::{Address, Create, Evm, Log, RawMem, RawStorage}
+use std::evm::{Address, Create, Evm, Log, RawMem, RawOps, RawStorage}
 use super::libraries::tick_bitmap::int_key
-use super::mock_time_uniswap_v3_pool::MockTimeUniswapV3Pool
 
 const PARAMETERS_FACTORY_SLOT: u256 = 0
 const PARAMETERS_TOKEN0_SLOT: u256 = 1
@@ -9,14 +8,12 @@ const PARAMETERS_PACKED_SLOT: u256 = 3
 const MASK_U24: u256 = 0xffffff
 const POOL_DEPLOYED_TOPIC: u256 = 0xf0d1eeab175eee2e20b8dc452773bf2257b25724b323b42bc6e5b4616233ae1f
 
+#[arithmetic(unchecked)]
 fn int24_word(_ value: i32) -> u256 {
     int_key(value as i256) & MASK_U24
 }
 
-fn int24_abi_word(_ value: i32) -> u256 {
-    int_key(value as i256)
-}
-
+#[arithmetic(unchecked)]
 fn decode_int24_word(_ word: u256) -> i32 {
     let value = word & MASK_U24
     if (value & 0x800000) == 0 {
@@ -28,6 +25,7 @@ fn decode_int24_word(_ word: u256) -> i32 {
     0 - magnitude_i
 }
 
+#[arithmetic(unchecked)]
 fn store_parameters(factory: Address, token0: Address, token1: Address, fee: u32, tick_spacing: i32)
 uses (evm: mut Evm)
 {
@@ -47,31 +45,20 @@ fn clear_parameters() uses (evm: mut Evm) {
     evm.sstore(slot: PARAMETERS_PACKED_SLOT, value: 0)
 }
 
-fn pool_salt(token0: Address, token1: Address, fee: u32, tick_spacing: i32) -> u256
-uses (evm: mut Evm)
-{
-    evm.mstore(addr: 0, value: token0.inner << 96)
-    evm.mstore(addr: 20, value: token1.inner << 96)
-    evm.mstore(addr: 40, value: (fee as u256) << 232)
-    evm.mstore(addr: 43, value: int24_word(tick_spacing) << 232)
-    evm.keccak256(offset: 0, len: 46)
-}
-
+#[arithmetic(unchecked)]
 fn emit_pool_deployed(_ pool: Address) uses (evm: mut Evm) {
     evm.mstore(addr: 0, value: pool.inner)
     evm.log1(offset: 0, len: 32, topic0: POOL_DEPLOYED_TOPIC)
 }
 
+#[arithmetic(unchecked)]
 fn return_parameters() uses (evm: mut Evm) {
     let packed = evm.sload(PARAMETERS_PACKED_SLOT)
     evm.mstore(addr: 0, value: evm.sload(PARAMETERS_FACTORY_SLOT))
     evm.mstore(addr: 32, value: evm.sload(PARAMETERS_TOKEN0_SLOT))
     evm.mstore(addr: 64, value: evm.sload(PARAMETERS_TOKEN1_SLOT))
     evm.mstore(addr: 96, value: packed & MASK_U24)
-    evm.mstore(
-        addr: 128,
-        value: int24_abi_word(decode_int24_word(packed >> 24)),
-    )
+    evm.mstore(addr: 128, value: packed >> 24)
     evm.return_data(offset: 0, len: 160)
 }
 
@@ -79,7 +66,7 @@ msg MockTimeUniswapV3PoolDeployerMsg {
     #[selector = 0x89035730]
     Parameters,
 
-    #[selector = 0xfad5359f]
+    #[selector = 0xda6c843d]
     Deploy,
 }
 
@@ -90,16 +77,20 @@ pub contract MockTimeUniswapV3PoolDeployer uses (evm: mut Evm) {
         }
 
         Deploy uses (mut evm) {
-            assert(evm.calldatasize() >= 164)
+            assert(evm.calldatasize() >= 196)
             let factory = Address { inner: evm.calldataload(4) }
             let token0 = Address { inner: evm.calldataload(36) }
             let token1 = Address { inner: evm.calldataload(68) }
             let fee: u32 = (evm.calldataload(100) & MASK_U24).downcast_unchecked()
             let tick_spacing = decode_int24_word(evm.calldataload(132))
             store_parameters(factory, token0, token1, fee, tick_spacing)
-            // Mock-only size shim while Fe's embedded child initcode is still large.
-            // Fe artifact tests do not assert the deterministic mock-pool address.
-            let pool = evm.create<MockTimeUniswapV3Pool>(value: 0, args: ())
+            let init_head = 4 + evm.calldataload(164)
+            let init_len = evm.calldataload(init_head)
+            assert(evm.calldatasize() >= init_head + 32 + init_len)
+            let init_ptr = std::evm::mem::alloc(init_len)
+            evm.calldatacopy(dest: init_ptr, offset: init_head + 32, len: init_len)
+            let pool = evm.create_raw(value: 0, offset: init_ptr, len: init_len)
+            assert(pool.inner != 0)
             clear_parameters()
             emit_pool_deployed(pool)
             evm.mstore(addr: 0, value: pool.inner)

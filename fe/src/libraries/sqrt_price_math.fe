@@ -9,6 +9,7 @@ use super::unsafe_math::div_rounding_up
 const MAX_U160: u256 = 0xffffffffffffffffffffffffffffffffffffffff
 const U256_MAX: u256 = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
 
+#[arithmetic(unchecked)]
 pub fn get_next_sqrt_price_from_input(
     sqrt_p_x96: u256,
     _ liquidity: u128,
@@ -36,6 +37,7 @@ pub fn get_next_sqrt_price_from_input(
     )
 }
 
+#[arithmetic(unchecked)]
 pub fn get_next_sqrt_price_from_output(
     sqrt_p_x96: u256,
     _ liquidity: u128,
@@ -102,6 +104,7 @@ pub fn get_next_sqrt_price_from_amount0_rounding_up(
     )
 }
 
+#[arithmetic(unchecked)]
 pub fn get_next_sqrt_price_from_amount1_rounding_down(
     sqrt_p_x96: u256,
     _ liquidity: u128,
@@ -133,6 +136,7 @@ pub fn get_next_sqrt_price_from_amount1_rounding_down(
     sqrt_p_x96 - quotient
 }
 
+#[arithmetic(unchecked)]
 pub fn get_amount0_delta(
     sqrt_ratio_a_x96: u256,
     sqrt_ratio_b_x96: u256,
@@ -164,6 +168,7 @@ pub fn get_amount0_delta(
     mul_div(numerator1, numerator2, denominator: sqrt_ratio_upper) / sqrt_ratio_lower
 }
 
+#[arithmetic(unchecked)]
 pub fn get_amount1_delta(
     sqrt_ratio_a_x96: u256,
     sqrt_ratio_b_x96: u256,
@@ -188,6 +193,7 @@ pub fn get_amount1_delta(
     mul_div(liquidity as u256, delta, denominator: Q96)
 }
 
+#[arithmetic(unchecked)]
 pub fn to_u160(_ x: u256) -> u256 {
     assert(x <= MAX_U160)
     x

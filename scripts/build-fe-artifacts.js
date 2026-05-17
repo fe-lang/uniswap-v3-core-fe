@@ -344,6 +344,40 @@ const abiOverrides = {
       stateMutability: 'nonpayable',
     },
   ],
+  UniswapV3PoolSwapTest: [
+    {
+      type: 'constructor',
+      inputs: [],
+      stateMutability: 'nonpayable',
+    },
+    {
+      type: 'function',
+      name: 'getSwapResult',
+      inputs: [
+        { name: 'pool', type: 'address' },
+        { name: 'zeroForOne', type: 'bool' },
+        { name: 'amountSpecified', type: 'int256' },
+        { name: 'sqrtPriceLimitX96', type: 'uint160' },
+      ],
+      outputs: [
+        { name: 'amount0Delta', type: 'int256' },
+        { name: 'amount1Delta', type: 'int256' },
+        { name: 'nextSqrtRatio', type: 'uint160' },
+      ],
+      stateMutability: 'nonpayable',
+    },
+    {
+      type: 'function',
+      name: 'uniswapV3SwapCallback',
+      inputs: [
+        { name: 'amount0Delta', type: 'int256' },
+        { name: 'amount1Delta', type: 'int256' },
+        { name: 'data', type: 'bytes' },
+      ],
+      outputs: [],
+      stateMutability: 'nonpayable',
+    },
+  ],
   UniswapV3Factory: [
     {
       type: 'constructor',
@@ -526,6 +560,7 @@ const abiOverrides = {
         { name: 'token1', type: 'address' },
         { name: 'fee', type: 'uint24' },
         { name: 'tickSpacing', type: 'int24' },
+        { name: 'initCode', type: 'bytes' },
       ],
       outputs: [{ name: 'pool', type: 'address' }],
       stateMutability: 'nonpayable',
@@ -620,6 +655,19 @@ const abiOverrides = {
         { name: 'amount1', type: 'uint256', indexed: false },
         { name: 'paid0', type: 'uint256', indexed: false },
         { name: 'paid1', type: 'uint256', indexed: false },
+      ],
+    },
+    {
+      type: 'event',
+      name: 'Swap',
+      inputs: [
+        { name: 'sender', type: 'address', indexed: true },
+        { name: 'recipient', type: 'address', indexed: true },
+        { name: 'amount0', type: 'int256', indexed: false },
+        { name: 'amount1', type: 'int256', indexed: false },
+        { name: 'sqrtPriceX96', type: 'uint160', indexed: false },
+        { name: 'liquidity', type: 'uint128', indexed: false },
+        { name: 'tick', type: 'int24', indexed: false },
       ],
     },
     {

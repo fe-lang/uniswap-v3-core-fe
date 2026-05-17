@@ -104,7 +104,7 @@ pub contract UniswapV3PoolSwapTest uses (ctx: Ctx, evm: mut Evm) {
             let (amount0_delta, amount1_delta) = evm
                 .call(
                     addr: pool,
-                    gas: 1000000,
+                    gas: evm.gas(),
                     value: 0,
                     message: PoolMsg::Swap {
                         recipient: Address::zero(),

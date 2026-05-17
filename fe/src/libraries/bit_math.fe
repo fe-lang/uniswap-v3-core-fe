@@ -1,6 +1,7 @@
 use std::abi::sol
 use std::evm::{Ctx, Evm}
 
+#[arithmetic(unchecked)]
 pub fn most_significant_bit(_ x: u256) -> u8 {
     assert(x > 0)
 
@@ -15,6 +16,7 @@ pub fn most_significant_bit(_ x: u256) -> u8 {
     r.downcast_unchecked()
 }
 
+#[arithmetic(unchecked)]
 pub fn least_significant_bit(_ x: u256) -> u8 {
     assert(x > 0)
 

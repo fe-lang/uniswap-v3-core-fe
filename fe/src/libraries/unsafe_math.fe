@@ -1,5 +1,6 @@
 use std::abi::sol
 
+#[arithmetic(unchecked)]
 pub fn div_rounding_up(numerator: u256, denominator: u256) -> u256 {
     if numerator % denominator > 0 {
         return (numerator / denominator) + 1

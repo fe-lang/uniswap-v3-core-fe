@@ -127,7 +127,17 @@ describe('UniswapV3Pool', () => {
       utils.keccak256(MockTimeUniswapV3PoolFactory.bytecode)
     )
 
-    const tx = await deployer.deploy(factory.address, token0.address, token1.address, feeAmount, tickSpacing)
+    const tx =
+      usingFeArtifacts
+        ? await (deployer as any).deploy(
+            factory.address,
+            token0.address,
+            token1.address,
+            feeAmount,
+            tickSpacing,
+            MockTimeUniswapV3PoolFactory.bytecode
+          )
+        : await deployer.deploy(factory.address, token0.address, token1.address, feeAmount, tickSpacing)
     const receipt = await tx.wait()
     const poolAddress = receipt.events?.[0].args?.pool as string
 

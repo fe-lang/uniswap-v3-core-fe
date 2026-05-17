@@ -4,6 +4,7 @@ use super::revert_reason::{require_short, MSG_LA, MSG_LS}
 
 const MAX_U128: u128 = 0xffffffffffffffffffffffffffffffff
 
+#[arithmetic(unchecked)]
 pub fn add_delta(_ x: u128, _ y: i128) -> u128 uses (evm: mut Evm) {
     if y < 0 {
         let delta: u128 = (0 - y).downcast_unchecked()

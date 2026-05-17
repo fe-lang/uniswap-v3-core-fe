@@ -10,11 +10,13 @@ const MASK_U128: u256 = 0xffffffffffffffffffffffffffffffff
 const MIN_I24: i256 = -0x800000
 const MAX_I24: i256 = 0x7fffff
 
+#[arithmetic(unchecked)]
 fn checked_int24_word(_ value: i256) -> u256 {
     assert(value >= MIN_I24 && value <= MAX_I24)
     int_key(value) & MASK_U24
 }
 
+#[arithmetic(unchecked)]
 pub fn position_key(owner: Address, tick_lower: i256, tick_upper: i256) -> u256
 uses (evm: mut Evm)
 {
@@ -26,6 +28,7 @@ uses (evm: mut Evm)
     evm.keccak256(offset: ptr, len: 26)
 }
 
+#[arithmetic(unchecked)]
 pub fn mapping_slot(key: u256, positions_slot: u256) -> u256 uses (evm: mut Evm) {
     let ptr = mem::alloc(0)
     evm.mstore(addr: ptr, value: key)
@@ -33,6 +36,7 @@ pub fn mapping_slot(key: u256, positions_slot: u256) -> u256 uses (evm: mut Evm)
     evm.keccak256(offset: ptr, len: 64)
 }
 
+#[arithmetic(unchecked)]
 pub fn position_slot(
     owner: Address,
     tick_lower: i256,
@@ -47,46 +51,57 @@ uses (evm: mut Evm)
     )
 }
 
+#[arithmetic(unchecked)]
 fn slot0(_ base_slot: u256) -> u256 uses (evm: mut Evm) {
     evm.sload(base_slot)
 }
 
+#[arithmetic(unchecked)]
 fn slot1(_ base_slot: u256) -> u256 uses (evm: mut Evm) {
     evm.sload(base_slot + 1)
 }
 
+#[arithmetic(unchecked)]
 fn slot2(_ base_slot: u256) -> u256 uses (evm: mut Evm) {
     evm.sload(base_slot + 2)
 }
 
+#[arithmetic(unchecked)]
 fn slot3(_ base_slot: u256) -> u256 uses (evm: mut Evm) {
     evm.sload(base_slot + 3)
 }
 
+#[arithmetic(unchecked)]
 pub fn liquidity(_ base_slot: u256) -> u128 uses (evm: mut Evm) {
     (slot0(base_slot) & MASK_U128).downcast_unchecked()
 }
 
+#[arithmetic(unchecked)]
 pub fn fee_growth_inside0_last_x128(_ base_slot: u256) -> u256 uses (evm: mut Evm) {
     slot1(base_slot)
 }
 
+#[arithmetic(unchecked)]
 pub fn fee_growth_inside1_last_x128(_ base_slot: u256) -> u256 uses (evm: mut Evm) {
     slot2(base_slot)
 }
 
+#[arithmetic(unchecked)]
 pub fn tokens_owed0(_ base_slot: u256) -> u128 uses (evm: mut Evm) {
     (slot3(base_slot) & MASK_U128).downcast_unchecked()
 }
 
+#[arithmetic(unchecked)]
 pub fn tokens_owed1(_ base_slot: u256) -> u128 uses (evm: mut Evm) {
     ((slot3(base_slot) >> 128) & MASK_U128).downcast_unchecked()
 }
 
+#[arithmetic(unchecked)]
 fn store_liquidity(base_slot: u256, value: u128) uses (evm: mut Evm) {
     evm.sstore(slot: base_slot, value: value as u256)
 }
 
+#[arithmetic(unchecked)]
 fn store_tokens_owed(base_slot: u256, token0: u128, token1: u128)
 uses (evm: mut Evm)
 {
@@ -96,6 +111,7 @@ uses (evm: mut Evm)
     )
 }
 
+#[arithmetic(unchecked)]
 pub fn read_position(_ base_slot: u256) -> (u128, u256, u256, u128, u128)
 uses (evm: mut Evm)
 {
@@ -108,6 +124,7 @@ uses (evm: mut Evm)
     )
 }
 
+#[arithmetic(unchecked)]
 pub fn set_position(
     base_slot: u256,
     liquidity_value: u128,

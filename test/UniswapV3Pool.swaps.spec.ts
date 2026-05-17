@@ -132,6 +132,13 @@ async function executeSwap(
   return swap
 }
 
+function formatSwapError(error: any): string {
+  const message = String(error?.reason ?? error?.message ?? error)
+  const reasonMatch =
+    message.match(/reverted with reason string '([^']+)'/) ?? message.match(/revert(?:ed)? ([A-Z0-9]+)/)
+  return reasonMatch ? `revert ${reasonMatch[1]}` : message
+}
+
 const DEFAULT_POOL_SWAP_TESTS: SwapTestCase[] = [
   // swap large amounts in/out
   {
@@ -512,7 +519,7 @@ describe('UniswapV3Pool swap tests', () => {
             await tx
           } catch (error) {
             expect({
-              swapError: error.message,
+              swapError: formatSwapError(error),
               poolBalance0: poolBalance0.toString(),
               poolBalance1: poolBalance1.toString(),
               poolPriceBefore: formatPrice(slot0.sqrtPriceX96),

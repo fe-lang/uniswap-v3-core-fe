@@ -146,7 +146,7 @@ pub contract TestUniswapV3Router uses (ctx: Ctx, evm: mut Evm) {
             let _ = evm
                 .call(
                     addr: poolOutput,
-                    gas: 1000000,
+                    gas: evm.gas(),
                     value: 0,
                     message: PoolMsg::Swap {
                         recipient,
@@ -164,7 +164,7 @@ pub contract TestUniswapV3Router uses (ctx: Ctx, evm: mut Evm) {
             let _ = evm
                 .call(
                     addr: poolOutput,
-                    gas: 1000000,
+                    gas: evm.gas(),
                     value: 0,
                     message: PoolMsg::Swap {
                         recipient,
@@ -204,7 +204,7 @@ pub contract TestUniswapV3Router uses (ctx: Ctx, evm: mut Evm) {
                 let _ = evm
                     .call(
                         addr: pool,
-                        gas: 1000000,
+                        gas: evm.gas(),
                         value: 0,
                         message: PoolMsg::Swap {
                             recipient: ctx.caller(),
