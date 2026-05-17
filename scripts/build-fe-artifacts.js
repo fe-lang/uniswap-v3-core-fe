@@ -381,7 +381,7 @@ const abiOverrides = {
   UniswapV3Factory: [
     {
       type: 'constructor',
-      inputs: [],
+      inputs: [{ name: 'poolInitCode', type: 'bytes' }],
       stateMutability: 'nonpayable',
     },
     {
@@ -938,6 +938,22 @@ const abiOverrides = {
       outputs: [],
       stateMutability: 'nonpayable',
     },
+    {
+      type: 'function',
+      name: 'swap',
+      inputs: [
+        { name: 'recipient', type: 'address' },
+        { name: 'zeroForOne', type: 'bool' },
+        { name: 'amountSpecified', type: 'int256' },
+        { name: 'sqrtPriceLimitX96', type: 'uint160' },
+        { name: 'data', type: 'bytes' },
+      ],
+      outputs: [
+        { name: 'amount0', type: 'int256' },
+        { name: 'amount1', type: 'int256' },
+      ],
+      stateMutability: 'nonpayable',
+    },
   ],
   NoDelegateCallTest: [
     {
@@ -1396,6 +1412,25 @@ const abiOverrides = {
     },
   ],
 }
+
+const mockOnlyPoolFunctionNames = new Set([
+  'advanceTime',
+  'time',
+  'setFeeGrowthGlobal0X128',
+  'setFeeGrowthGlobal1X128',
+])
+
+abiOverrides.UniswapV3Pool = abiOverrides.MockTimeUniswapV3Pool
+  .filter(({ type, name }) => type !== 'function' || !mockOnlyPoolFunctionNames.has(name))
+  .concat([
+    {
+      type: 'function',
+      name: 'tickBitmap',
+      inputs: [{ name: '', type: 'int16' }],
+      outputs: [{ name: '', type: 'uint256' }],
+      stateMutability: 'view',
+    },
+  ])
 
 function prefixedHex(hex) {
   const trimmed = hex.trim()

@@ -16,7 +16,8 @@ interface FactoryFixture {
 
 async function factoryFixture(): Promise<FactoryFixture> {
   const factoryFactory = await getContractFactory('UniswapV3Factory')
-  const factory = (await factoryFactory.deploy()) as UniswapV3Factory
+  const deployArgs = process.env.FE_ARTIFACTS === '1' ? [(await getContractFactory('UniswapV3Pool')).bytecode] : []
+  const factory = (await factoryFactory.deploy(...deployArgs)) as UniswapV3Factory
   return { factory }
 }
 

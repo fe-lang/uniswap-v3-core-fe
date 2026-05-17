@@ -5,7 +5,7 @@ import { expect } from './shared/expect'
 import { getContractFactory } from './shared/feArtifacts'
 import snapshotGasCost from './shared/snapshotGasCost'
 
-import { FeeAmount, getCreate2Address, TICK_SPACINGS } from './shared/utilities'
+import { FeeAmount, encodePriceSqrt, getCreate2Address, TICK_SPACINGS } from './shared/utilities'
 
 const { constants } = ethers
 
@@ -24,7 +24,8 @@ describe('UniswapV3Factory', () => {
   let poolBytecode: string
   const fixture = async () => {
     const factoryFactory = await getContractFactory('UniswapV3Factory')
-    return (await factoryFactory.deploy()) as UniswapV3Factory
+    const deployArgs = usingFeArtifacts ? [poolBytecode] : []
+    return (await factoryFactory.deploy(...deployArgs)) as UniswapV3Factory
   }
 
   let loadFixture: ReturnType<typeof createFixtureLoader>
@@ -79,7 +80,7 @@ describe('UniswapV3Factory', () => {
     tokens: [string, string],
     feeAmount: FeeAmount,
     tickSpacing: number = TICK_SPACINGS[feeAmount]
-  ) {
+  ): Promise<string> {
     const create2Address = getCreate2Address(factory.address, tokens, feeAmount, poolBytecode)
     const create = factory.createPool(tokens[0], tokens[1], feeAmount)
 
@@ -112,6 +113,7 @@ describe('UniswapV3Factory', () => {
     expect(await pool.token1(), 'pool token1').to.eq(TEST_ADDRESSES[1])
     expect(await pool.fee(), 'pool fee').to.eq(feeAmount)
     expect(await pool.tickSpacing(), 'pool tick spacing').to.eq(tickSpacing)
+    return poolAddress
   }
 
   describe('#createPool', () => {
@@ -128,6 +130,18 @@ describe('UniswapV3Factory', () => {
 
     it('succeeds if tokens are passed in reverse', async () => {
       await createAndCheckPool([TEST_ADDRESSES[1], TEST_ADDRESSES[0]], FeeAmount.MEDIUM)
+    })
+
+    it('created pool can initialize production pool state', async () => {
+      const poolAddress = await createAndCheckPool(TEST_ADDRESSES, FeeAmount.MEDIUM)
+      const pool = (await getContractFactory('UniswapV3Pool')).attach(poolAddress)
+      const price = encodePriceSqrt(1, 1)
+
+      await expect(pool.initialize(price)).to.emit(pool, 'Initialize').withArgs(price, 0)
+      const slot0 = await pool.slot0()
+      expect(slot0.sqrtPriceX96).to.eq(price)
+      expect(slot0.tick).to.eq(0)
+      expect(await pool.tickBitmap(0)).to.eq(0)
     })
 
     it('fails if token a == token b', async () => {

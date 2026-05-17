@@ -18,7 +18,7 @@ fn position(_ tick: i256) -> (i256, u256) {
 }
 
 #[arithmetic(unchecked)]
-fn word_slot(word_pos: i256, bitmap_slot: u256) -> u256 uses (evm: mut Evm) {
+pub fn word_slot(word_pos: i256, bitmap_slot: u256) -> u256 uses (evm: mut Evm) {
     let ptr = mem::alloc(0)
     evm.mstore(addr: ptr, value: int_key(word_pos))
     evm.mstore(addr: ptr + 32, value: bitmap_slot)
