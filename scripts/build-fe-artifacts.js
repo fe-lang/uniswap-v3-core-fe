@@ -1420,17 +1420,31 @@ function runFeBuild(contract) {
 function artifactNames() {
   if (contracts.length > 0) return contracts
 
-  return fs
-    .readdirSync(feOutDir)
-    .filter((name) => name.endsWith('.abi.json'))
-    .map((name) => name.slice(0, -'.abi.json'.length))
+  const names = new Set(
+    fs
+      .readdirSync(feOutDir)
+      .filter((name) => name.endsWith('.abi.json'))
+      .map((name) => name.slice(0, -'.abi.json'.length))
+  )
+  for (const contractName of Object.keys(abiOverrides)) {
+    if (fs.existsSync(path.join(feOutDir, `${contractName}.bin`))) names.add(contractName)
+  }
+
+  return [...names]
+    .filter((contractName) => fs.existsSync(path.join(feOutDir, `${contractName}.runtime.bin`)))
+    .sort()
+}
+
+function artifactAbi(contractName) {
+  if (abiOverrides[contractName]) return abiOverrides[contractName]
+
+  return JSON.parse(fs.readFileSync(path.join(feOutDir, `${contractName}.abi.json`), 'utf8'))
 }
 
 function writeHardhatArtifact(contractName) {
-  const abiPath = path.join(feOutDir, `${contractName}.abi.json`)
   const bytecodePath = path.join(feOutDir, `${contractName}.bin`)
   const runtimePath = path.join(feOutDir, `${contractName}.runtime.bin`)
-  const abi = abiOverrides[contractName] || JSON.parse(fs.readFileSync(abiPath, 'utf8'))
+  const abi = artifactAbi(contractName)
 
   const artifact = {
     _format: 'hh-sol-artifact-1',
