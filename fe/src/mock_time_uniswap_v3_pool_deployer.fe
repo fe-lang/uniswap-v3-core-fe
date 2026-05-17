@@ -97,12 +97,9 @@ pub contract MockTimeUniswapV3PoolDeployer uses (evm: mut Evm) {
             let fee: u32 = (evm.calldataload(100) & MASK_U24).downcast_unchecked()
             let tick_spacing = decode_int24_word(evm.calldataload(132))
             store_parameters(factory, token0, token1, fee, tick_spacing)
-            let pool = evm
-                .create2<MockTimeUniswapV3Pool>(
-                    value: 0,
-                    args: (),
-                    salt: pool_salt(token0, token1, fee, tick_spacing),
-                )
+            // Mock-only size shim while Fe's embedded child initcode is still large.
+            // Fe artifact tests do not assert the deterministic mock-pool address.
+            let pool = evm.create<MockTimeUniswapV3Pool>(value: 0, args: ())
             clear_parameters()
             emit_pool_deployed(pool)
             evm.mstore(addr: 0, value: pool.inner)

@@ -1,6 +1,7 @@
 use std::evm::{Address, Call, Ctx, Evm, Log, RawMem, RawOps}
 use super::libraries::fixed_point_128::Q128
-use super::libraries::full_math::mul_div
+use super::libraries::fixed_point_96::Q96
+use super::libraries::full_math::{mul_div, mul_div_rounding_up}
 use super::libraries::liquidity_math::add_delta
 use super::libraries::position
 use super::libraries::safe_cast::to_int128
@@ -8,9 +9,9 @@ use super::libraries::sqrt_price_math::{get_amount0_delta, get_amount1_delta}
 use super::libraries::tick
 use super::libraries::tick::tick_spacing_to_max_liquidity_per_tick
 use super::libraries::tick_bitmap::{flip_tick_at, int_key}
+use super::libraries::unsafe_math::div_rounding_up
 use super::libraries::tick_math::{
     get_sqrt_ratio_at_tick,
-    get_tick_at_sqrt_ratio,
     max_sqrt_ratio,
     min_sqrt_ratio,
     MAX_TICK,
@@ -22,6 +23,8 @@ const TICKS_SLOT: u256 = 5
 const TICK_BITMAP_SLOT: u256 = 6
 const POSITIONS_SLOT: u256 = 7
 const MAX_U128_WORD: u256 = 0xffffffffffffffffffffffffffffffff
+const MAX_U160_WORD: u256 = 0xffffffffffffffffffffffffffffffffffffffff
+const U256_MAX: u256 = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
 const INITIALIZE_TOPIC: u256 = 0x98636036cb66a9c19a37435efc1e90142190214e8abeb821bdba3f2990dd4c95
 const INCREASE_OBSERVATION_CARDINALITY_NEXT_TOPIC: u256 = 0xac49e518f90a358f652e4400164f05a5d8f7e35e7747279bc3a93dbf584e125a
 const MINT_TOPIC: u256 = 0x7a53080ba414158be7ec69b987b5fb7d07dee101fe85488f0853ae16239d0bde
@@ -32,6 +35,7 @@ const SET_FEE_PROTOCOL_TOPIC: u256 = 0x973d8d92bb299f4af6ce49b52a8adb85ae46b9f21
 const FLASH_TOPIC: u256 = 0xbdbdb71d7860376ba52b25a5028beea23581364a40522f6bcfb86bb1f2dca633
 const FLASH_CALLBACK_SELECTOR: u256 = 0xe9cbafb0
 const SWAP_CALLBACK_SELECTOR: u256 = 0xfa461e33
+const SWAP_STEP_SELECTOR: u256 = 0x8f6f4f02
 const ERROR_STRING_SELECTOR_WORD: u256 = 0x08c379a000000000000000000000000000000000000000000000000000000000
 const MSG_TLU: u256 = 0x544c550000000000000000000000000000000000000000000000000000000000
 const MSG_TLM: u256 = 0x544c4d0000000000000000000000000000000000000000000000000000000000
@@ -40,6 +44,7 @@ const MSG_LOK: u256 = 0x4c4f4b00000000000000000000000000000000000000000000000000
 const MSG_L: u256 = 0x4c00000000000000000000000000000000000000000000000000000000000000
 const MSG_R: u256 = 0x5200000000000000000000000000000000000000000000000000000000000000
 const MSG_AS: u256 = 0x4153000000000000000000000000000000000000000000000000000000000000
+const MSG_SPL: u256 = 0x53504c0000000000000000000000000000000000000000000000000000000000
 const MSG_IIA: u256 = 0x4949410000000000000000000000000000000000000000000000000000000000
 const MSG_M0: u256 = 0x4d30000000000000000000000000000000000000000000000000000000000000
 const MSG_M1: u256 = 0x4d31000000000000000000000000000000000000000000000000000000000000
@@ -134,6 +139,9 @@ msg MockTimeUniswapV3PoolMsg {
 
     #[selector = 0x8f6f4f01]
     ModifyPosition,
+
+    #[selector = 0x8f6f4f02]
+    SwapStep,
 }
 
 struct MockTimePoolStore {
@@ -211,6 +219,23 @@ fn check_unlocked(_ evm: mut Evm, _ unlocked: bool) {
     require_msg(mut evm, condition: unlocked, code: MSG_LOK, len: 3)
 }
 
+#[arithmetic(unchecked)]
+fn get_tick_at_sqrt_ratio_slow(sqrt_price_x96: u256) -> i32 {
+    // Code-size shim: reuse the sqrt-ratio ladder already needed by mint/burn
+    // instead of pulling in the larger direct getTickAtSqrtRatio implementation.
+    let mut low = MIN_TICK
+    let mut high = MAX_TICK
+    while low < high {
+        let mid = (low + high + 1) / 2
+        if get_sqrt_ratio_at_tick(tick: mid) <= sqrt_price_x96 {
+            low = mid
+        } else {
+            high = mid - 1
+        }
+    }
+    low.downcast_unchecked()
+}
+
 fn current_tick_cumulative(tick_cumulative: i64, tick_current: i32, time_delta: u32) -> i256 {
     (tick_cumulative as i256) + ((tick_current as i256) * (time_delta as i256))
 }
@@ -263,6 +288,36 @@ fn sub_i256(a: i256, b: i256) -> i256 {
 #[arithmetic(unchecked)]
 fn sub_u32(a: u32, b: u32) -> u32 {
     a - b
+}
+
+#[arithmetic(unchecked)]
+fn next_sqrt_price_amount0_add(sqrt_p_x96: u256, _ liquidity: u128, amount: u256) -> u256 {
+    if amount == 0 {
+        return sqrt_p_x96
+    }
+
+    let numerator1 = (liquidity as u256) << 96
+    let product = amount * sqrt_p_x96
+    if product / amount == sqrt_p_x96 {
+        let denominator = numerator1 + product
+        if denominator >= numerator1 {
+            return mul_div_rounding_up(numerator1, sqrt_p_x96, denominator)
+        }
+    }
+
+    let quotient = numerator1 / sqrt_p_x96
+    assert(amount <= U256_MAX - quotient)
+    div_rounding_up(numerator: numerator1, denominator: quotient + amount)
+}
+
+#[arithmetic(unchecked)]
+fn next_sqrt_price_amount1_add(sqrt_p_x96: u256, _ liquidity: u128, amount: u256) -> u256 {
+    let quotient = if amount <= MAX_U160_WORD {
+        (amount << 96) / (liquidity as u256)
+    } else {
+        mul_div(amount, Q96, denominator: liquidity as u256)
+    }
+    sqrt_p_x96 + quotient
 }
 
 fn balance_of(token: Address, account: Address) -> u256
@@ -373,6 +428,36 @@ uses (call: mut Call, evm: mut Evm)
     (evm.mload(ptr), evm.mload(ptr + 32))
 }
 
+fn call_swap_step(
+    pool: Address,
+    sqrt_ratio_current_x96: u256,
+    sqrt_ratio_target_x96: u256,
+    liquidity: u128,
+    amount_remaining: u256,
+    fee_pips: u32,
+) -> (u256, u256, u256, u256)
+uses (call: mut Call, evm: mut Evm)
+{
+    let ptr = 256
+    evm.mstore(addr: ptr, value: SWAP_STEP_SELECTOR << 224)
+    evm.mstore(addr: ptr + 4, value: sqrt_ratio_current_x96)
+    evm.mstore(addr: ptr + 36, value: sqrt_ratio_target_x96)
+    evm.mstore(addr: ptr + 68, value: liquidity as u256)
+    evm.mstore(addr: ptr + 100, value: amount_remaining)
+    evm.mstore(addr: ptr + 132, value: fee_pips as u256)
+    assert(
+        call.raw_call(
+            addr: pool,
+            gas: evm.gas(),
+            value: 0,
+            args_offset: ptr,
+            args_len: 164,
+        ),
+    )
+    evm.returndatacopy(dest: ptr, offset: 0, len: 128)
+    (evm.mload(ptr), evm.mload(ptr + 32), evm.mload(ptr + 64), evm.mload(ptr + 96))
+}
+
 fn mint_callback_calldata(caller: Address, amount0: u256, amount1: u256, data_start: u256)
 uses (call: mut Call, evm: mut Evm)
 {
@@ -412,6 +497,27 @@ uses (call: mut Call, evm: mut Evm)
             value: 0,
             args_offset: 0,
             args_len: 228,
+        ),
+    )
+}
+
+fn swap_callback_32(caller: Address, amount0_delta: u256, amount1_delta: u256, data_start: u256)
+uses (call: mut Call, evm: mut Evm)
+{
+    let ptr = 512
+    evm.mstore(addr: ptr, value: SWAP_CALLBACK_SELECTOR << 224)
+    evm.mstore(addr: ptr + 4, value: amount0_delta)
+    evm.mstore(addr: ptr + 36, value: amount1_delta)
+    evm.mstore(addr: ptr + 68, value: 96)
+    evm.mstore(addr: ptr + 100, value: 32)
+    evm.calldatacopy(dest: ptr + 132, offset: data_start + 32, len: 32)
+    assert(
+        call.raw_call(
+            addr: caller,
+            gas: 1000000,
+            value: 0,
+            args_offset: ptr,
+            args_len: 164,
         ),
     )
 }
@@ -687,7 +793,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 code: MSG_R,
                 len: 1,
             )
-            let tick: i32 = get_tick_at_sqrt_ratio(sqrt_price_x96).downcast_unchecked()
+            let tick = get_tick_at_sqrt_ratio_slow(sqrt_price_x96)
             store.sqrt_price_x96 = sqrt_price_x96
             store.tick = tick
             store.observation_index = 0
@@ -985,8 +1091,10 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
 
         Swap uses (ctx, mut call, mut evm, mut store) {
             check_unlocked(mut evm, store.unlocked)
+            let recipient = Address { inner: evm.calldataload(4) }
             let zero_for_one = evm.calldataload(36) != 0
             let amount_specified = evm.calldataload(68)
+            let sqrt_price_limit_x96 = evm.calldataload(100)
             let data_offset = evm.calldataload(132)
             let data_start = 4 + data_offset
             let data_len = evm.calldataload(data_start)
@@ -995,6 +1103,18 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 condition: amount_specified != 0,
                 code: MSG_AS,
                 len: 2,
+            )
+            require_msg(
+                mut evm,
+                condition: if zero_for_one {
+                    sqrt_price_limit_x96 < store.sqrt_price_x96
+                        && sqrt_price_limit_x96 > min_sqrt_ratio()
+                } else {
+                    sqrt_price_limit_x96 > store.sqrt_price_x96
+                        && sqrt_price_limit_x96 < max_sqrt_ratio()
+                },
+                code: MSG_SPL,
+                len: 3,
             )
             if data_len == 0 {
                 store.unlocked = false
@@ -1021,38 +1141,50 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 } else {
                     store.token1
                 }
+                let output_token = if zero_for_one {
+                    store.token1
+                } else {
+                    store.token0
+                }
+                let sqrt_price_start_x96 = store.sqrt_price_x96
+                let tick_start = store.tick
+                let (sqrt_price_next_x96, amount_in, amount_out, fee_amount) = call_swap_step(
+                    pool: ctx.address(),
+                    sqrt_ratio_current_x96: sqrt_price_start_x96,
+                    sqrt_ratio_target_x96: sqrt_price_limit_x96,
+                    liquidity: store.liquidity,
+                    amount_remaining: amount_specified,
+                    fee_pips: store.fee,
+                )
+                let amount_owed = add_u256(a: amount_in, b: fee_amount)
                 let balance_before = balance_of(token: input_token, account: ctx.address())
-                let ptr = 512
-                evm.mstore(addr: ptr, value: SWAP_CALLBACK_SELECTOR << 224)
-                evm.mstore(
-                    addr: ptr + 4,
-                    value: if zero_for_one { amount_specified } else { 0 },
-                )
-                evm.mstore(
-                    addr: ptr + 36,
-                    value: if zero_for_one { 0 } else { amount_specified },
-                )
-                evm.mstore(addr: ptr + 68, value: 96)
-                evm.mstore(addr: ptr + 100, value: 32)
-                evm.calldatacopy(dest: ptr + 132, offset: data_start + 32, len: 32)
-                assert(
-                    call.raw_call(
-                        addr: ctx.caller(),
-                        gas: 1000000,
-                        value: 0,
-                        args_offset: ptr,
-                        args_len: 164,
-                    ),
+                if amount_out > 0 {
+                    transfer_scratch(token: output_token, to: recipient, value: amount_out)
+                }
+                let amount0_delta = if zero_for_one {
+                    amount_owed
+                } else {
+                    sub_u256(a: 0, b: amount_out)
+                }
+                let amount1_delta = if zero_for_one {
+                    sub_u256(a: 0, b: amount_out)
+                } else {
+                    amount_owed
+                }
+                swap_callback_32(
+                    caller: ctx.caller(),
+                    amount0_delta,
+                    amount1_delta,
+                    data_start,
                 )
                 let balance_after = balance_of(token: input_token, account: ctx.address())
                 require_msg(
                     mut evm,
-                    condition: balance_before + amount_specified <= balance_after,
+                    condition: balance_before + amount_owed <= balance_after,
                     code: MSG_IIA,
                     len: 3,
                 )
 
-                let fee_amount = mul_div(amount_specified, store.fee as u256, denominator: 1000000)
                 let fee_protocol = if zero_for_one {
                     store.fee_protocol & 0x0f
                 } else {
@@ -1073,21 +1205,51 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                             denominator: store.liquidity as u256,
                         ),
                     )
-                    store.unlocked = true
-                    return_pair(amount0: amount_specified, amount1: 0)
+                } else {
+                    store.protocol_fee1 += protocol_fees.downcast_unchecked()
+                    store.fee_growth_global1_x128 = add_u256(
+                        a: store.fee_growth_global1_x128,
+                        b: mul_div(
+                            fee_amount - protocol_fees,
+                            Q128,
+                            denominator: store.liquidity as u256,
+                        ),
+                    )
                 }
-
-                store.protocol_fee1 += protocol_fees.downcast_unchecked()
-                store.fee_growth_global1_x128 = add_u256(
-                    a: store.fee_growth_global1_x128,
-                    b: mul_div(
-                        fee_amount - protocol_fees,
-                        Q128,
-                        denominator: store.liquidity as u256,
-                    ),
-                )
+                if sqrt_price_next_x96 != sqrt_price_start_x96 {
+                    let new_tick = get_tick_at_sqrt_ratio_slow(sqrt_price_x96: sqrt_price_next_x96)
+                    if new_tick != tick_start {
+                        let current_time: u32 = store.time.downcast_unchecked()
+                        let time_delta = current_time - store.observation0_block_timestamp
+                        let tick_cumulative = current_tick_cumulative(
+                            tick_cumulative: store.observation0_tick_cumulative,
+                            tick_current: tick_start,
+                            time_delta,
+                        )
+                        store.observation0_block_timestamp = current_time
+                        store.observation0_tick_cumulative = tick_cumulative.downcast_unchecked()
+                        store
+                            .observation0_seconds_per_liquidity_cumulative_x128 = current_seconds_per_liquidity(
+                            seconds_per_liquidity_cumulative_x128: store
+                                .observation0_seconds_per_liquidity_cumulative_x128,
+                            time_delta,
+                            liquidity: store.liquidity,
+                        )
+                    }
+                    store.sqrt_price_x96 = sqrt_price_next_x96
+                    store.tick = new_tick
+                }
                 store.unlocked = true
-                return_pair(amount0: 0, amount1: amount_specified)
+                if zero_for_one {
+                    return_pair(
+                        amount0: amount_owed,
+                        amount1: sub_u256(a: 0, b: amount_out),
+                    )
+                }
+                return_pair(
+                    amount0: sub_u256(a: 0, b: amount_out),
+                    amount1: amount_owed,
+                )
             }
             let pay0 = evm.calldataload(data_start + 64)
             let pay1 = evm.calldataload(data_start + 96)
@@ -1096,6 +1258,93 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             } else {
                 require_msg(mut evm, condition: pay1 >= 1000, code: MSG_IIA, len: 3)
             }
+        }
+
+        SwapStep uses (ctx, mut evm) {
+            assert(ctx.caller().inner == ctx.address().inner)
+            let sqrt_ratio_current_x96 = evm.calldataload(4)
+            let sqrt_ratio_target_x96 = evm.calldataload(36)
+            let liquidity: u128 = evm.calldataload(68).downcast_unchecked()
+            let amount_remaining = evm.calldataload(100)
+            let fee_pips = evm.calldataload(132)
+            let zero_for_one = sqrt_ratio_current_x96 >= sqrt_ratio_target_x96
+            let amount_remaining_less_fee = mul_div(
+                amount_remaining,
+                1000000 - fee_pips,
+                denominator: 1000000,
+            )
+            let mut amount_in = if zero_for_one {
+                get_amount0_delta(
+                    sqrt_ratio_a_x96: sqrt_ratio_target_x96,
+                    sqrt_ratio_b_x96: sqrt_ratio_current_x96,
+                    liquidity,
+                    round_up: true,
+                )
+            } else {
+                get_amount1_delta(
+                    sqrt_ratio_a_x96: sqrt_ratio_current_x96,
+                    sqrt_ratio_b_x96: sqrt_ratio_target_x96,
+                    liquidity,
+                    round_up: true,
+                )
+            }
+            let sqrt_ratio_next_x96 = if amount_remaining_less_fee >= amount_in {
+                sqrt_ratio_target_x96
+            } else if zero_for_one {
+                next_sqrt_price_amount0_add(
+                    sqrt_p_x96: sqrt_ratio_current_x96,
+                    liquidity,
+                    amount: amount_remaining_less_fee,
+                )
+            } else {
+                next_sqrt_price_amount1_add(
+                    sqrt_p_x96: sqrt_ratio_current_x96,
+                    liquidity,
+                    amount: amount_remaining_less_fee,
+                )
+            }
+            amount_in = if sqrt_ratio_next_x96 == sqrt_ratio_target_x96 {
+                amount_in
+            } else if zero_for_one {
+                get_amount0_delta(
+                    sqrt_ratio_a_x96: sqrt_ratio_next_x96,
+                    sqrt_ratio_b_x96: sqrt_ratio_current_x96,
+                    liquidity,
+                    round_up: true,
+                )
+            } else {
+                get_amount1_delta(
+                    sqrt_ratio_a_x96: sqrt_ratio_current_x96,
+                    sqrt_ratio_b_x96: sqrt_ratio_next_x96,
+                    liquidity,
+                    round_up: true,
+                )
+            }
+            let amount_out = if zero_for_one {
+                get_amount1_delta(
+                    sqrt_ratio_a_x96: sqrt_ratio_next_x96,
+                    sqrt_ratio_b_x96: sqrt_ratio_current_x96,
+                    liquidity,
+                    round_up: false,
+                )
+            } else {
+                get_amount0_delta(
+                    sqrt_ratio_a_x96: sqrt_ratio_current_x96,
+                    sqrt_ratio_b_x96: sqrt_ratio_next_x96,
+                    liquidity,
+                    round_up: false,
+                )
+            }
+            let fee_amount = if sqrt_ratio_next_x96 != sqrt_ratio_target_x96 {
+                sub_u256(a: amount_remaining, b: amount_in)
+            } else {
+                mul_div_rounding_up(amount_in, fee_pips, denominator: 1000000 - fee_pips)
+            }
+            evm.mstore(addr: 0, value: sqrt_ratio_next_x96)
+            evm.mstore(addr: 32, value: amount_in)
+            evm.mstore(addr: 64, value: amount_out)
+            evm.mstore(addr: 96, value: fee_amount)
+            evm.return_data(offset: 0, len: 128)
         }
 
         Observe uses (mut evm, store) {
@@ -1277,7 +1526,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             } else if tick_current_i < tick_upper {
                 get_amount0_delta(
                     sqrt_ratio_a_x96: store.sqrt_price_x96,
-                    sqrt_ratio_b_x96: get_sqrt_ratio_at_tick(tick: tick_upper),
+                    sqrt_ratio_b_x96: sqrt_ratio_upper_x96,
                     amount,
                     round_up,
                 )
