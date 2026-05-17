@@ -1,6 +1,7 @@
 use std::abi::sol::{self, Int24}
-use std::evm::{assert_msg, mem, Evm, RawMem, RawOps, RawStorage}
+use std::evm::{mem, Evm, RawMem, RawOps, RawStorage}
 use super::liquidity_math::add_delta
+use super::revert_reason::{require_short, MSG_LO}
 use super::safe_cast::to_int128
 use super::tick_bitmap::int_key
 use super::tick_math::{MAX_TICK, MIN_TICK}
@@ -424,7 +425,12 @@ uses (evm: mut Evm)
     assert(seconds_per_liquidity_cumulative_x128 <= MAX_U160)
     let liquidity_gross_before = liquidity_gross_at(tick, ticks_slot: ticks_slot)
     let liquidity_gross_after = add_delta(liquidity_gross_before, liquidity_delta)
-    assert_msg(liquidity_gross_after <= max_liquidity, "LO")
+    require_short(
+        mut evm,
+        condition: liquidity_gross_after <= max_liquidity,
+        code: MSG_LO,
+        len: 2,
+    )
 
     let flipped = (liquidity_gross_after == 0) != (liquidity_gross_before == 0)
     if liquidity_gross_before == 0 {

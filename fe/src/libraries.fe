@@ -7,6 +7,7 @@ pub use low_gas_safe_math::{self}
 pub use no_delegate_call::{self}
 pub use oracle::{self}
 pub use position::{self}
+pub use revert_reason::{self}
 pub use sqrt_price_math::{self}
 pub use swap_math::{self}
 pub use tick::{self}

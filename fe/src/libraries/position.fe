@@ -1,7 +1,8 @@
-use std::evm::{assert_msg, mem, Address, Evm, RawMem, RawStorage}
+use std::evm::{mem, Address, Evm, RawMem, RawStorage}
 use super::fixed_point_128::Q128
 use super::full_math::mul_div
 use super::liquidity_math::add_delta
+use super::revert_reason::{require_short, MSG_NP}
 use super::tick_bitmap::int_key
 
 const MASK_U24: u256 = 0xffffff
@@ -145,7 +146,12 @@ uses (evm: mut Evm)
     ) = read_position(base_slot)
 
     let liquidity_next = if liquidity_delta == 0 {
-        assert_msg(liquidity_before > 0, "NP")
+        require_short(
+            mut evm,
+            condition: liquidity_before > 0,
+            code: MSG_NP,
+            len: 2,
+        )
         liquidity_before
     } else {
         add_delta(liquidity_before, liquidity_delta)

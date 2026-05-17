@@ -1,21 +1,27 @@
 use std::abi::sol
-use std::evm::{assert_msg, Ctx, Evm}
+use std::evm::{Ctx, Evm}
+use super::revert_reason::{require_short, MSG_LA, MSG_LS}
 
 const MAX_U128: u128 = 0xffffffffffffffffffffffffffffffff
 
-pub fn add_delta(_ x: u128, _ y: i128) -> u128 {
+pub fn add_delta(_ x: u128, _ y: i128) -> u128 uses (evm: mut Evm) {
     if y < 0 {
         let delta: u128 = (0 - y).downcast_unchecked()
-        assert_msg(x >= delta, "LS")
+        require_short(mut evm, condition: x >= delta, code: MSG_LS, len: 2)
         let z = x - delta
-        assert_msg(z < x, "LS")
+        require_short(mut evm, condition: z < x, code: MSG_LS, len: 2)
         return z
     }
 
     let delta: u128 = y.downcast_unchecked()
-    assert_msg(x <= MAX_U128 - delta, "LA")
+    require_short(
+        mut evm,
+        condition: x <= MAX_U128 - delta,
+        code: MSG_LA,
+        len: 2,
+    )
     let z = x + delta
-    assert_msg(z >= x, "LA")
+    require_short(mut evm, condition: z >= x, code: MSG_LA, len: 2)
     z
 }
 
@@ -27,13 +33,13 @@ msg LiquidityMathTestMsg {
     GetGasCostOfAddDelta { x: u128, y: i128 } -> u256,
 }
 
-pub contract LiquidityMathTest uses (evm: Evm) {
+pub contract LiquidityMathTest uses (evm: mut Evm) {
     recv LiquidityMathTestMsg {
-        AddDelta { x, y } -> u128 {
+        AddDelta { x, y } -> u128 uses (mut evm) {
             add_delta(x, y)
         }
 
-        GetGasCostOfAddDelta { x, y } -> u256 uses (evm) {
+        GetGasCostOfAddDelta { x, y } -> u256 uses (mut evm) {
             let gas_before = evm.gas()
             add_delta(x, y)
             gas_before - evm.gas()

@@ -1,0 +1,18 @@
+use std::evm::{Evm, RawMem, RawOps}
+
+const ERROR_STRING_SELECTOR_WORD: u256 = 0x08c379a000000000000000000000000000000000000000000000000000000000
+
+pub const MSG_LA: u256 = 0x4c41000000000000000000000000000000000000000000000000000000000000
+pub const MSG_LO: u256 = 0x4c4f000000000000000000000000000000000000000000000000000000000000
+pub const MSG_LS: u256 = 0x4c53000000000000000000000000000000000000000000000000000000000000
+pub const MSG_NP: u256 = 0x4e50000000000000000000000000000000000000000000000000000000000000
+
+pub fn require_short(_ evm: mut Evm, condition: bool, code: u256, len: u256) {
+    if !condition {
+        evm.mstore(addr: 0, value: ERROR_STRING_SELECTOR_WORD)
+        evm.mstore(addr: 4, value: 32)
+        evm.mstore(addr: 36, value: len)
+        evm.mstore(addr: 68, value: code)
+        evm.revert(offset: 0, len: 100)
+    }
+}

@@ -28,6 +28,28 @@ const oracleInitializeParamsComponents = [
 ]
 
 const abiOverrides = {
+  LiquidityMathTest: [
+    {
+      type: 'function',
+      name: 'addDelta',
+      inputs: [
+        { name: 'x', type: 'uint128' },
+        { name: 'y', type: 'int128' },
+      ],
+      outputs: [{ name: 'z', type: 'uint128' }],
+      stateMutability: 'pure',
+    },
+    {
+      type: 'function',
+      name: 'getGasCostOfAddDelta',
+      inputs: [
+        { name: 'x', type: 'uint128' },
+        { name: 'y', type: 'int128' },
+      ],
+      outputs: [{ name: '', type: 'uint256' }],
+      stateMutability: 'view',
+    },
+  ],
   TestERC20: [
     {
       type: 'constructor',
