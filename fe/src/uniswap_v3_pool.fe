@@ -1286,6 +1286,8 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
             let sqrt_price_start_x96 = store.sqrt_price_x96
             let tick_start = store.tick
             let current_time: u32 = evm.timestamp().downcast_unchecked()
+            let fee_pips = store.fee
+            let tick_spacing = store.tick_spacing as i256
             let mut tick_cumulative: i256 = 0
             let mut seconds_per_liquidity_cumulative_x128: u256 = 0
             let mut computed_latest_observation = false
@@ -1313,7 +1315,7 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
                 let sqrt_price_step_start_x96 = sqrt_price_x96
                 let (mut tick_next, initialized) = next_initialized_tick_within_one_word_at(
                     tick: tick_current,
-                    tick_spacing: store.tick_spacing as i256,
+                    tick_spacing,
                     lte: zero_for_one,
                     bitmap_slot: TICK_BITMAP_SLOT,
                 )
@@ -1342,7 +1344,7 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
                     sqrt_ratio_target_x96: sqrt_price_target_x96,
                     liquidity: liquidity_current,
                     amount_remaining,
-                    fee_pips: store.fee,
+                    fee_pips,
                 )
                 sqrt_price_x96 = sqrt_price_next_x96
                 let amount_in_with_fee = add_u256(a: amount_in, b: fee_amount)
