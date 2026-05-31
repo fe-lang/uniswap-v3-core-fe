@@ -1298,7 +1298,8 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
             let mut amount_out_total = 0
             let mut sqrt_price_x96 = sqrt_price_start_x96
             let mut tick_current = tick_start as i256
-            let mut liquidity_current = store.liquidity
+            let liquidity_start = store.liquidity
+            let mut liquidity_current = liquidity_start
             let mut protocol_fees = 0
             let fee_protocol = if zero_for_one {
                 store.fee_protocol & 0x0f
@@ -1388,7 +1389,7 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
                                 tick_current: tick_start,
                                 seconds_per_liquidity_cumulative_x128: store
                                     .observation0_seconds_per_liquidity_cumulative_x128,
-                                liquidity: store.liquidity,
+                                liquidity: liquidity_start,
                             )
                             tick_cumulative = observation.0
                             seconds_per_liquidity_cumulative_x128 = observation.1
@@ -1435,7 +1436,7 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
                         tick_current: tick_start,
                         seconds_per_liquidity_cumulative_x128: store
                             .observation0_seconds_per_liquidity_cumulative_x128,
-                        liquidity: store.liquidity,
+                        liquidity: liquidity_start,
                     )
                     tick_cumulative = observation.0
                     seconds_per_liquidity_cumulative_x128 = observation.1
@@ -1449,7 +1450,7 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
             } else if sqrt_price_x96 != sqrt_price_start_x96 {
                 store.sqrt_price_x96 = sqrt_price_x96
             }
-            if liquidity_current != store.liquidity {
+            if liquidity_current != liquidity_start {
                 store.liquidity = liquidity_current
             }
             if zero_for_one {
