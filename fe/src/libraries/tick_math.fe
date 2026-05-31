@@ -96,10 +96,36 @@ pub fn get_tick_at_sqrt_ratio(sqrt_price_x96: u256) -> i256 {
     let mut r = ratio
     let mut msb: u256 = 0
 
-    while r > 1 {
-        r = r >> 1
-        msb = msb + 1
-    }
+    let f128 = ((r > 0xffffffffffffffffffffffffffffffff) as u256) << 7
+    msb = msb | f128
+    r = r >> f128
+
+    let f64 = ((r > 0xffffffffffffffff) as u256) << 6
+    msb = msb | f64
+    r = r >> f64
+
+    let f32 = ((r > 0xffffffff) as u256) << 5
+    msb = msb | f32
+    r = r >> f32
+
+    let f16 = ((r > 0xffff) as u256) << 4
+    msb = msb | f16
+    r = r >> f16
+
+    let f8 = ((r > 0xff) as u256) << 3
+    msb = msb | f8
+    r = r >> f8
+
+    let f4 = ((r > 0xf) as u256) << 2
+    msb = msb | f4
+    r = r >> f4
+
+    let f2 = ((r > 0x3) as u256) << 1
+    msb = msb | f2
+    r = r >> f2
+
+    let f1 = (r > 0x1) as u256
+    msb = msb | f1
 
     r = if msb >= 128 {
         ratio >> (msb - 127)
@@ -109,15 +135,88 @@ pub fn get_tick_at_sqrt_ratio(sqrt_price_x96: u256) -> i256 {
 
     let msb_i: i256 = msb.downcast_unchecked()
     let mut log_2: i256 = (msb_i - 128) << 64
-    let mut bit: i256 = 63
-    while bit >= 50 {
-        r = (r * r) >> 127
-        let f = r >> 128
-        let f_i: i256 = f.downcast_unchecked()
-        log_2 = log_2 + (f_i << bit)
-        r = r >> f
-        bit = bit - 1
-    }
+    r = (r * r) >> 127
+    let f63 = r >> 128
+    let f63_i: i256 = f63.downcast_unchecked()
+    log_2 = log_2 + (f63_i << 63)
+    r = r >> f63
+
+    r = (r * r) >> 127
+    let f62 = r >> 128
+    let f62_i: i256 = f62.downcast_unchecked()
+    log_2 = log_2 + (f62_i << 62)
+    r = r >> f62
+
+    r = (r * r) >> 127
+    let f61 = r >> 128
+    let f61_i: i256 = f61.downcast_unchecked()
+    log_2 = log_2 + (f61_i << 61)
+    r = r >> f61
+
+    r = (r * r) >> 127
+    let f60 = r >> 128
+    let f60_i: i256 = f60.downcast_unchecked()
+    log_2 = log_2 + (f60_i << 60)
+    r = r >> f60
+
+    r = (r * r) >> 127
+    let f59 = r >> 128
+    let f59_i: i256 = f59.downcast_unchecked()
+    log_2 = log_2 + (f59_i << 59)
+    r = r >> f59
+
+    r = (r * r) >> 127
+    let f58 = r >> 128
+    let f58_i: i256 = f58.downcast_unchecked()
+    log_2 = log_2 + (f58_i << 58)
+    r = r >> f58
+
+    r = (r * r) >> 127
+    let f57 = r >> 128
+    let f57_i: i256 = f57.downcast_unchecked()
+    log_2 = log_2 + (f57_i << 57)
+    r = r >> f57
+
+    r = (r * r) >> 127
+    let f56 = r >> 128
+    let f56_i: i256 = f56.downcast_unchecked()
+    log_2 = log_2 + (f56_i << 56)
+    r = r >> f56
+
+    r = (r * r) >> 127
+    let f55 = r >> 128
+    let f55_i: i256 = f55.downcast_unchecked()
+    log_2 = log_2 + (f55_i << 55)
+    r = r >> f55
+
+    r = (r * r) >> 127
+    let f54 = r >> 128
+    let f54_i: i256 = f54.downcast_unchecked()
+    log_2 = log_2 + (f54_i << 54)
+    r = r >> f54
+
+    r = (r * r) >> 127
+    let f53 = r >> 128
+    let f53_i: i256 = f53.downcast_unchecked()
+    log_2 = log_2 + (f53_i << 53)
+    r = r >> f53
+
+    r = (r * r) >> 127
+    let f52 = r >> 128
+    let f52_i: i256 = f52.downcast_unchecked()
+    log_2 = log_2 + (f52_i << 52)
+    r = r >> f52
+
+    r = (r * r) >> 127
+    let f51 = r >> 128
+    let f51_i: i256 = f51.downcast_unchecked()
+    log_2 = log_2 + (f51_i << 51)
+    r = r >> f51
+
+    r = (r * r) >> 127
+    let f50 = r >> 128
+    let f50_i: i256 = f50.downcast_unchecked()
+    log_2 = log_2 + (f50_i << 50)
 
     let log_sqrt10001 = log_2 * 255738958999603826347141
     let tick_low = (log_sqrt10001 - 3402992956809132418596140100660247210) >> 128

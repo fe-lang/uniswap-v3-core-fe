@@ -12,6 +12,7 @@ use super::libraries::tick_bitmap::{flip_tick_at, int_key, next_initialized_tick
 use super::libraries::unsafe_math::div_rounding_up
 use super::libraries::tick_math::{
     get_sqrt_ratio_at_tick,
+    get_tick_at_sqrt_ratio,
     max_sqrt_ratio,
     min_sqrt_ratio,
     MAX_TICK,
@@ -227,20 +228,8 @@ fn check_unlocked(_ evm: mut Evm, _ unlocked: bool) {
 }
 
 #[arithmetic(unchecked)]
-fn get_tick_at_sqrt_ratio_slow(sqrt_price_x96: u256) -> i32 {
-    // Code-size shim: reuse the sqrt-ratio ladder already needed by mint/burn
-    // instead of pulling in the larger direct getTickAtSqrtRatio implementation.
-    let mut low = MIN_TICK
-    let mut high = MAX_TICK
-    while low < high {
-        let mid = (low + high + 1) / 2
-        if get_sqrt_ratio_at_tick(tick: mid) <= sqrt_price_x96 {
-            low = mid
-        } else {
-            high = mid - 1
-        }
-    }
-    low.downcast_unchecked()
+fn tick_at_sqrt_ratio(sqrt_price_x96: u256) -> i32 {
+    get_tick_at_sqrt_ratio(sqrt_price_x96).downcast_unchecked()
 }
 
 #[arithmetic(unchecked)]
@@ -474,24 +463,132 @@ fn call_swap_step(
 ) -> (u256, u256, u256, u256)
 uses (call: mut Call, evm: mut Evm)
 {
-    let ptr = 256
-    evm.mstore(addr: ptr, value: SWAP_STEP_SELECTOR << 224)
-    evm.mstore(addr: ptr + 4, value: sqrt_ratio_current_x96)
-    evm.mstore(addr: ptr + 36, value: sqrt_ratio_target_x96)
-    evm.mstore(addr: ptr + 68, value: liquidity as u256)
-    evm.mstore(addr: ptr + 100, value: amount_remaining)
-    evm.mstore(addr: ptr + 132, value: fee_pips as u256)
-    assert(
-        call.raw_call(
-            addr: pool,
-            gas: evm.gas(),
-            value: 0,
-            args_offset: ptr,
-            args_len: 164,
-        ),
-    )
-    evm.returndatacopy(dest: ptr, offset: 0, len: 128)
-    (evm.mload(ptr), evm.mload(ptr + 32), evm.mload(ptr + 64), evm.mload(ptr + 96))
+    let zero_for_one = sqrt_ratio_current_x96 >= sqrt_ratio_target_x96
+    let exact_input = amount_remaining <= MAX_I256_WORD
+    let amount_remaining_abs = if exact_input {
+        amount_remaining
+    } else {
+        sub_u256(a: 0, b: amount_remaining)
+    }
+    let mut amount_in: u256 = 0
+    let mut amount_out: u256 = 0
+    let mut sqrt_ratio_next_x96: u256 = 0
+    if exact_input {
+        let amount_remaining_less_fee = mul_div(
+            amount_remaining_abs,
+            1000000 - (fee_pips as u256),
+            denominator: 1000000,
+        )
+        amount_in = if zero_for_one {
+            get_amount0_delta(
+                sqrt_ratio_a_x96: sqrt_ratio_target_x96,
+                sqrt_ratio_b_x96: sqrt_ratio_current_x96,
+                liquidity,
+                round_up: true,
+            )
+        } else {
+            get_amount1_delta(
+                sqrt_ratio_a_x96: sqrt_ratio_current_x96,
+                sqrt_ratio_b_x96: sqrt_ratio_target_x96,
+                liquidity,
+                round_up: true,
+            )
+        }
+        sqrt_ratio_next_x96 = if amount_remaining_less_fee >= amount_in {
+            sqrt_ratio_target_x96
+        } else if zero_for_one {
+            next_sqrt_price_amount0_add(
+                sqrt_p_x96: sqrt_ratio_current_x96,
+                liquidity,
+                amount: amount_remaining_less_fee,
+            )
+        } else {
+            next_sqrt_price_amount1_add(
+                sqrt_p_x96: sqrt_ratio_current_x96,
+                liquidity,
+                amount: amount_remaining_less_fee,
+            )
+        }
+    } else {
+        amount_out = if zero_for_one {
+            get_amount1_delta(
+                sqrt_ratio_a_x96: sqrt_ratio_target_x96,
+                sqrt_ratio_b_x96: sqrt_ratio_current_x96,
+                liquidity,
+                round_up: false,
+            )
+        } else {
+            get_amount0_delta(
+                sqrt_ratio_a_x96: sqrt_ratio_current_x96,
+                sqrt_ratio_b_x96: sqrt_ratio_target_x96,
+                liquidity,
+                round_up: false,
+            )
+        }
+        sqrt_ratio_next_x96 = if amount_remaining_abs >= amount_out {
+            sqrt_ratio_target_x96
+        } else if zero_for_one {
+            next_sqrt_price_amount1_sub(
+                sqrt_p_x96: sqrt_ratio_current_x96,
+                liquidity,
+                amount: amount_remaining_abs,
+            )
+        } else {
+            next_sqrt_price_amount0_sub(
+                sqrt_p_x96: sqrt_ratio_current_x96,
+                liquidity,
+                amount: amount_remaining_abs,
+            )
+        }
+    }
+    let max = sqrt_ratio_next_x96 == sqrt_ratio_target_x96
+    amount_in = if max && exact_input {
+        amount_in
+    } else if zero_for_one {
+        get_amount0_delta(
+            sqrt_ratio_a_x96: sqrt_ratio_next_x96,
+            sqrt_ratio_b_x96: sqrt_ratio_current_x96,
+            liquidity,
+            round_up: true,
+        )
+    } else {
+        get_amount1_delta(
+            sqrt_ratio_a_x96: sqrt_ratio_current_x96,
+            sqrt_ratio_b_x96: sqrt_ratio_next_x96,
+            liquidity,
+            round_up: true,
+        )
+    }
+    amount_out = if max && !exact_input {
+        amount_out
+    } else if zero_for_one {
+        get_amount1_delta(
+            sqrt_ratio_a_x96: sqrt_ratio_next_x96,
+            sqrt_ratio_b_x96: sqrt_ratio_current_x96,
+            liquidity,
+            round_up: false,
+        )
+    } else {
+        get_amount0_delta(
+            sqrt_ratio_a_x96: sqrt_ratio_current_x96,
+            sqrt_ratio_b_x96: sqrt_ratio_next_x96,
+            liquidity,
+            round_up: false,
+        )
+    }
+    if !exact_input && amount_out > amount_remaining_abs {
+        amount_out = amount_remaining_abs
+    }
+    let fee_amount = if exact_input && sqrt_ratio_next_x96 != sqrt_ratio_target_x96 {
+        sub_u256(a: amount_remaining_abs, b: amount_in)
+    } else {
+        mul_div_rounding_up(
+            amount_in,
+            fee_pips as u256,
+            denominator: 1000000 - (fee_pips as u256),
+        )
+    }
+    (sqrt_ratio_next_x96, amount_in, amount_out, fee_amount)
 }
 
 #[arithmetic(unchecked)]
@@ -863,7 +960,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 code: MSG_R,
                 len: 1,
             )
-            let tick = get_tick_at_sqrt_ratio_slow(sqrt_price_x96)
+            let tick = tick_at_sqrt_ratio(sqrt_price_x96)
             store.sqrt_price_x96 = sqrt_price_x96
             store.tick = tick
             store.observation_index = 0
@@ -936,26 +1033,18 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             check_ticks(mut evm, tick_lower: lower, tick_upper: upper)
 
             let (
-                _,
-                _,
-                _,
-                _,
                 tick_cumulative_lower,
                 seconds_per_liquidity_outside_lower,
                 seconds_outside_lower,
                 initialized_lower,
-            ) = tick::read_tick_at(lower, ticks_slot: TICKS_SLOT)
+            ) = tick::read_observation_tick_at(lower, ticks_slot: TICKS_SLOT)
             assert(initialized_lower)
             let (
-                _,
-                _,
-                _,
-                _,
                 tick_cumulative_upper,
                 seconds_per_liquidity_outside_upper,
                 seconds_outside_upper,
                 initialized_upper,
-            ) = tick::read_tick_at(upper, ticks_slot: TICKS_SLOT)
+            ) = tick::read_observation_tick_at(upper, ticks_slot: TICKS_SLOT)
             assert(initialized_upper)
 
             let tick_current = store.tick as i256
@@ -1328,9 +1417,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                         tick_next
                     }
                 } else if sqrt_price_x96 != sqrt_price_step_start_x96 {
-                    tick_current = get_tick_at_sqrt_ratio_slow(
-                        sqrt_price_x96: sqrt_price_x96,
-                    ) as i256
+                    tick_current = tick_at_sqrt_ratio(sqrt_price_x96: sqrt_price_x96) as i256
                 }
             }
 

@@ -6,7 +6,7 @@ const repoRoot = path.resolve(__dirname, '..')
 const feRoot = path.join(repoRoot, 'fe')
 const feOutDir = path.join(feRoot, 'out')
 const hardhatOutDir = path.join(feRoot, 'hardhat-artifacts')
-const feBin = process.env.FE_BIN || '/Users/sean/code/fe/uni-v3-compiler-v3/target/release/fe'
+const feBin = process.env.FE_BIN || '/Users/sean/code/fe/debug/target/release/fe'
 const feOptimize = process.env.FE_OPTIMIZE || 's'
 const contracts = process.argv.slice(2)
 
@@ -381,7 +381,7 @@ const abiOverrides = {
   UniswapV3Factory: [
     {
       type: 'constructor',
-      inputs: [{ name: 'poolInitCode', type: 'bytes' }],
+      inputs: [],
       stateMutability: 'nonpayable',
     },
     {
@@ -560,7 +560,6 @@ const abiOverrides = {
         { name: 'token1', type: 'address' },
         { name: 'fee', type: 'uint24' },
         { name: 'tickSpacing', type: 'int24' },
-        { name: 'initCode', type: 'bytes' },
       ],
       outputs: [{ name: 'pool', type: 'address' }],
       stateMutability: 'nonpayable',

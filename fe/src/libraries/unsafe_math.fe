@@ -1,12 +1,9 @@
 use std::abi::sol
 
 #[arithmetic(unchecked)]
+#[inline(always)]
 pub fn div_rounding_up(numerator: u256, denominator: u256) -> u256 {
-    if numerator % denominator > 0 {
-        return (numerator / denominator) + 1
-    }
-
-    numerator / denominator
+    (numerator / denominator) + (((numerator % denominator) > 0) as u256)
 }
 
 msg UnsafeMathEchidnaTestMsg {

@@ -1,5 +1,6 @@
 use std::evm::{Address, Create, Evm, Log, RawMem, RawOps, RawStorage}
 use super::libraries::tick_bitmap::int_key
+use super::mock_time_uniswap_v3_pool::MockTimeUniswapV3Pool
 
 const PARAMETERS_FACTORY_SLOT: u256 = 0
 const PARAMETERS_TOKEN0_SLOT: u256 = 1
@@ -11,6 +12,20 @@ const POOL_DEPLOYED_TOPIC: u256 = 0xf0d1eeab175eee2e20b8dc452773bf2257b25724b323
 #[arithmetic(unchecked)]
 fn int24_word(_ value: i32) -> u256 {
     int_key(value as i256) & MASK_U24
+}
+
+#[arithmetic(unchecked)]
+fn pool_salt(token0: Address, token1: Address, fee: u32, tick_spacing: i32) -> u256
+uses (evm: mut Evm)
+{
+    let ptr = std::evm::mem::alloc(0)
+    evm.mstore(addr: ptr, value: token0.inner << 96)
+    evm.mstore(addr: ptr + 20, value: token1.inner << 96)
+    evm.mstore(
+        addr: ptr + 40,
+        value: (((fee as u256) << 24) | int24_word(tick_spacing)) << 208,
+    )
+    evm.keccak256(offset: ptr, len: 46)
 }
 
 #[arithmetic(unchecked)]
@@ -66,7 +81,7 @@ msg MockTimeUniswapV3PoolDeployerMsg {
     #[selector = 0x89035730]
     Parameters,
 
-    #[selector = 0xda6c843d]
+    #[selector = 0xfad5359f]
     Deploy,
 }
 
@@ -77,19 +92,19 @@ pub contract MockTimeUniswapV3PoolDeployer uses (evm: mut Evm) {
         }
 
         Deploy uses (mut evm) {
-            assert(evm.calldatasize() >= 196)
+            assert(evm.calldatasize() >= 164)
             let factory = Address { inner: evm.calldataload(4) }
             let token0 = Address { inner: evm.calldataload(36) }
             let token1 = Address { inner: evm.calldataload(68) }
             let fee: u32 = (evm.calldataload(100) & MASK_U24).downcast_unchecked()
             let tick_spacing = decode_int24_word(evm.calldataload(132))
             store_parameters(factory, token0, token1, fee, tick_spacing)
-            let init_head = 4 + evm.calldataload(164)
-            let init_len = evm.calldataload(init_head)
-            assert(evm.calldatasize() >= init_head + 32 + init_len)
-            let init_ptr = std::evm::mem::alloc(init_len)
-            evm.calldatacopy(dest: init_ptr, offset: init_head + 32, len: init_len)
-            let pool = evm.create_raw(value: 0, offset: init_ptr, len: init_len)
+            let pool = evm
+                .create2<MockTimeUniswapV3Pool>(
+                    value: 0,
+                    args: (),
+                    salt: pool_salt(token0, token1, fee, tick_spacing),
+                )
             assert(pool.inner != 0)
             clear_parameters()
             emit_pool_deployed(pool)

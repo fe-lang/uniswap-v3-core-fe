@@ -113,13 +113,12 @@ pub fn get_next_sqrt_price_from_amount1_rounding_down(
 ) -> u256 {
     assert(sqrt_p_x96 <= MAX_U160)
 
-    let quotient = if amount <= MAX_U160 {
-        (amount << (RESOLUTION as u256)) / (liquidity as u256)
-    } else {
-        mul_div(amount, Q96, denominator: liquidity as u256)
-    }
-
     if add {
+        let quotient = if amount <= MAX_U160 {
+            (amount << (RESOLUTION as u256)) / (liquidity as u256)
+        } else {
+            mul_div(amount, Q96, denominator: liquidity as u256)
+        }
         return to_u160(sqrt_p_x96 + quotient)
     }
 

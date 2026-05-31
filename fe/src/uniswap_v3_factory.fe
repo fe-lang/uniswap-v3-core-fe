@@ -1,6 +1,7 @@
 use std::abi::sol::{self, Int24, Uint24}
-use std::evm::{Address, Call, Create, Ctx, Evm, Log, RawMem, RawOps, RawStorage}
+use std::evm::{Address, Create, Ctx, Evm, Log, RawMem, RawStorage}
 use super::libraries::tick_bitmap::int_key
+use super::uniswap_v3_pool::UniswapV3Pool
 
 const PARAMETERS_FACTORY_SLOT: u256 = 0
 const PARAMETERS_TOKEN0_SLOT: u256 = 1
@@ -10,7 +11,6 @@ const OWNER_SLOT: u256 = 4
 const FEE_AMOUNT_TICK_SPACING_SLOT: u256 = 5
 const GET_POOL_SLOT: u256 = 6
 const ORIGINAL_SLOT: u256 = 7
-const POOL_INIT_CODE_HOLDER_SLOT: u256 = 8
 
 const MASK_U24: u256 = 0xffffff
 const MASK_U160: u256 = 0xffffffffffffffffffffffffffffffffffffffff
@@ -132,93 +132,6 @@ fn clear_parameters() uses (evm: mut Evm) {
     evm.sstore(slot: PARAMETERS_PACKED_SLOT, value: 0)
 }
 
-#[arithmetic(unchecked)]
-fn write_byte(ptr: u256, offset: u256, value: u256) uses (evm: mut Evm) {
-    evm.mstore8(addr: ptr + offset, value: value.downcast_unchecked())
-}
-
-#[arithmetic(unchecked)]
-fn write_push2(ptr: u256, offset: u256, value: u256) uses (evm: mut Evm) {
-    assert(value <= 0xffff)
-    write_byte(ptr, offset, value: 0x61)
-    write_byte(ptr, offset: offset + 1, value: value >> 8)
-    write_byte(ptr, offset: offset + 2, value: value & 0xff)
-}
-
-#[arithmetic(unchecked)]
-fn write_return_code_prefix(ptr: u256, data_len: u256, data_offset: u256)
-uses (evm: mut Evm)
-{
-    write_push2(ptr, offset: 0, value: data_len)
-    write_push2(ptr, offset: 3, value: data_offset)
-    write_byte(ptr, offset: 6, value: 0x60)
-    write_byte(ptr, offset: 7, value: 0)
-    write_byte(ptr, offset: 8, value: 0x39)
-    write_push2(ptr, offset: 9, value: data_len)
-    write_byte(ptr, offset: 12, value: 0x60)
-    write_byte(ptr, offset: 13, value: 0)
-    write_byte(ptr, offset: 14, value: 0xf3)
-}
-
-#[arithmetic(unchecked)]
-fn copy_words(dest: u256, src: u256, len: u256) uses (evm: mut Evm) {
-    let mut offset: u256 = 0
-    while offset < len {
-        evm.mstore(addr: dest + offset, value: evm.mload(src + offset))
-        offset += 32
-    }
-}
-
-#[arithmetic(unchecked)]
-fn deploy_pool_init_code_holder(pool_init_code: Bytes) -> Address
-uses (evm: mut Evm)
-{
-    let runtime_prefix_len = 15
-    let init_prefix_len = 15
-    let pool_init_len = pool_init_code.len
-    let runtime_len = runtime_prefix_len + pool_init_len
-    let init_len = init_prefix_len + runtime_len
-    let init_ptr = std::evm::mem::alloc(init_len)
-
-    write_return_code_prefix(
-        ptr: init_ptr,
-        data_len: runtime_len,
-        data_offset: init_prefix_len,
-    )
-    let runtime_ptr = init_ptr + init_prefix_len
-    write_return_code_prefix(
-        ptr: runtime_ptr,
-        data_len: pool_init_len,
-        data_offset: runtime_prefix_len,
-    )
-    copy_words(
-        dest: runtime_ptr + runtime_prefix_len,
-        src: pool_init_code.data + 32,
-        len: pool_init_len,
-    )
-
-    let holder = evm.create_raw(value: 0, offset: init_ptr, len: init_len)
-    assert(holder.inner != 0)
-    holder
-}
-
-fn load_pool_init_code() -> (u256, u256) uses (evm: mut Evm) {
-    let holder = address_at(POOL_INIT_CODE_HOLDER_SLOT)
-    assert(
-        evm.raw_call(
-            addr: holder,
-            gas: evm.gas(),
-            value: 0,
-            args_offset: 0,
-            args_len: 0,
-        ),
-    )
-    let init_len = evm.returndatasize()
-    let init_ptr = std::evm::mem::alloc(init_len)
-    evm.returndatacopy(dest: init_ptr, offset: 0, len: init_len)
-    (init_ptr, init_len)
-}
-
 fn pool_salt(token0: Address, token1: Address, fee: Uint24) -> u256
 uses (evm: mut Evm)
 {
@@ -306,16 +219,12 @@ msg UniswapV3FactoryMsg {
 }
 
 pub contract UniswapV3Factory uses (ctx: Ctx, evm: mut Evm) {
-    init(pool_init_code: Bytes)
+    init()
     uses (ctx, mut evm)
     {
         let owner = ctx.caller()
         store_address(slot: OWNER_SLOT, value: owner)
         evm.sstore(slot: ORIGINAL_SLOT, value: ctx.address().inner)
-        store_address(
-            slot: POOL_INIT_CODE_HOLDER_SLOT,
-            value: deploy_pool_init_code_holder(pool_init_code),
-        )
         emit_owner_changed(old_owner: Address::zero(), new_owner: owner)
         set_fee_amount_tick_spacing(fee: Uint24 { val: 500 }, tick_spacing: Int24 { val: 10 })
         emit_fee_amount_enabled(fee: Uint24 { val: 500 }, tick_spacing: Int24 { val: 10 })
@@ -377,14 +286,8 @@ pub contract UniswapV3Factory uses (ctx: Ctx, evm: mut Evm) {
                 fee,
                 tick_spacing: tick_spacing,
             )
-            let (init_ptr, init_len) = load_pool_init_code()
             let pool = evm
-                .create2_raw(
-                    value: 0,
-                    offset: init_ptr,
-                    len: init_len,
-                    salt: pool_salt(token0, token1, fee),
-                )
+                .create2<UniswapV3Pool>(value: 0, args: (), salt: pool_salt(token0, token1, fee))
             assert(pool.inner != 0)
             clear_parameters()
             set_pool(token0, token1, fee, pool)

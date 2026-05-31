@@ -17,6 +17,7 @@ use super::libraries::tick_bitmap::{
 use super::libraries::unsafe_math::div_rounding_up
 use super::libraries::tick_math::{
     get_sqrt_ratio_at_tick,
+    get_tick_at_sqrt_ratio,
     max_sqrt_ratio,
     min_sqrt_ratio,
     MAX_TICK,
@@ -232,20 +233,8 @@ fn check_unlocked(_ evm: mut Evm, _ unlocked: bool) {
 }
 
 #[arithmetic(unchecked)]
-fn get_tick_at_sqrt_ratio_slow(sqrt_price_x96: u256) -> i32 {
-    // Code-size shim: reuse the sqrt-ratio ladder already needed by mint/burn
-    // instead of pulling in the larger direct getTickAtSqrtRatio implementation.
-    let mut low = MIN_TICK
-    let mut high = MAX_TICK
-    while low < high {
-        let mid = (low + high + 1) / 2
-        if get_sqrt_ratio_at_tick(tick: mid) <= sqrt_price_x96 {
-            low = mid
-        } else {
-            high = mid - 1
-        }
-    }
-    low.downcast_unchecked()
+fn tick_at_sqrt_ratio(sqrt_price_x96: u256) -> i32 {
+    get_tick_at_sqrt_ratio(sqrt_price_x96).downcast_unchecked()
 }
 
 #[arithmetic(unchecked)]
@@ -867,7 +856,7 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
                 code: MSG_R,
                 len: 1,
             )
-            let tick = get_tick_at_sqrt_ratio_slow(sqrt_price_x96)
+            let tick = tick_at_sqrt_ratio(sqrt_price_x96)
             store.sqrt_price_x96 = sqrt_price_x96
             store.tick = tick
             store.observation_index = 0
@@ -1315,9 +1304,7 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
                         tick_next
                     }
                 } else if sqrt_price_x96 != sqrt_price_step_start_x96 {
-                    tick_current = get_tick_at_sqrt_ratio_slow(
-                        sqrt_price_x96: sqrt_price_x96,
-                    ) as i256
+                    tick_current = tick_at_sqrt_ratio(sqrt_price_x96: sqrt_price_x96) as i256
                 }
             }
 

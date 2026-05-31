@@ -1,5 +1,5 @@
 use std::abi::sol::{self, Int24}
-use std::evm::{assert_msg, mem, Evm, RawMem, RawOps, RawStorage}
+use std::evm::{mem, Evm, RawMem, RawOps, RawStorage}
 use super::tick_bitmap::int_key
 use super::tick_math::{MAX_TICK, MIN_TICK}
 
@@ -154,7 +154,7 @@ fn transform(last: Observation, block_timestamp: u32, tick: i256, liquidity: u12
 }
 
 pub fn initialize(time: u32, tick: i256, liquidity: u128) uses (evm: mut Evm) {
-    assert_msg(state_cardinality() == 0, "already initialized")
+    assert!(state_cardinality() == 0, "already initialized")
     write_observation(
         index: 0,
         block_timestamp: time,
@@ -243,7 +243,7 @@ uses (evm: mut Evm)
 
 pub fn grow(_ next: u16) -> u16 uses (evm: mut Evm) {
     let current = state_cardinality_next()
-    assert_msg(current > 0, "I")
+    assert!(current > 0, "I")
     if next <= current {
         return current
     }
@@ -357,7 +357,7 @@ uses (evm: Evm)
     if !oldest.initialized {
         oldest = read_observation(0)
     }
-    assert_msg(lte(time, a: oldest.block_timestamp, b: target), "OLD")
+    assert!(lte(time, a: oldest.block_timestamp, b: target), "OLD")
 
     binary_search(time, target, index, cardinality)
 }
@@ -414,7 +414,7 @@ fn encode_int56(_ value: i256) -> u256 {
 }
 
 fn handle_observe(return_gas: bool) -> ! uses (evm: mut Evm) {
-    assert_msg(state_cardinality() > 0, "I")
+    assert!(state_cardinality() > 0, "I")
     let gas_before = evm.gas()
     let args_offset = evm.calldataload(4)
     let len = evm.calldataload(4 + args_offset)

@@ -1,5 +1,5 @@
 use std::abi::sol::{self, Uint160}
-use std::evm::{assert_msg, Address, Ctx, Evm, RawMem}
+use std::evm::{Address, Ctx, Evm, RawMem}
 use super::libraries::tick_math::max_sqrt_ratio
 
 const ERROR_SELECTOR: u256 = 0x08c379a0
@@ -122,7 +122,7 @@ pub contract TestUniswapV3ReentrantCallee uses (ctx: Ctx, evm: mut Evm) {
             evm.mstore(addr: collect_protocol_ptr + 68, value: 0)
             raw_call_expect_lok(pool, args_offset: collect_protocol_ptr, args_len: 100)
 
-            assert_msg(false, "Unable to reenter")
+            assert!(false, "Unable to reenter")
         }
     }
 }

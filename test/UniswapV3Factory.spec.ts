@@ -24,8 +24,7 @@ describe('UniswapV3Factory', () => {
   let poolBytecode: string
   const fixture = async () => {
     const factoryFactory = await getContractFactory('UniswapV3Factory')
-    const deployArgs = usingFeArtifacts ? [poolBytecode] : []
-    return (await factoryFactory.deploy(...deployArgs)) as UniswapV3Factory
+    return (await factoryFactory.deploy()) as UniswapV3Factory
   }
 
   let loadFixture: ReturnType<typeof createFixtureLoader>

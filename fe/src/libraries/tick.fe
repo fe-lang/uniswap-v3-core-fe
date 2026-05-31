@@ -412,15 +412,19 @@ pub fn read_tick_at(_ tick: i256, ticks_slot: u256) -> (
 )
 uses (evm: mut Evm)
 {
+    let base = mapping_slot_at(tick, ticks_slot: ticks_slot)
+    let slot0_word = evm.sload(base)
+    let slot3_word = evm.sload(base + 3)
+    let liquidity_net_word = decode_signed(slot0_word >> 128, bits: 128)
     (
-        liquidity_gross_at(tick, ticks_slot: ticks_slot),
-        liquidity_net_at(tick, ticks_slot: ticks_slot),
-        slot1_at(tick, ticks_slot: ticks_slot),
-        slot2_at(tick, ticks_slot: ticks_slot),
-        tick_cumulative_outside_at(tick, ticks_slot: ticks_slot),
-        seconds_per_liquidity_outside_x128_at(tick, ticks_slot: ticks_slot),
-        seconds_outside_at(tick, ticks_slot: ticks_slot),
-        initialized_at(tick, ticks_slot: ticks_slot),
+        (slot0_word & MASK_U128).downcast_unchecked(),
+        liquidity_net_word.downcast_unchecked(),
+        evm.sload(base + 1),
+        evm.sload(base + 2),
+        decode_signed(slot3_word, bits: 56),
+        (slot3_word >> 56) & MASK_U160,
+        ((slot3_word >> 216) & MAX_U32).downcast_unchecked(),
+        ((slot3_word >> 248) & 0xff) != 0,
     )
 }
 
@@ -428,6 +432,19 @@ pub fn read_tick(_ tick: i256) -> (u128, i128, u256, u256, i256, u256, u32, bool
 uses (evm: mut Evm)
 {
     read_tick_at(tick, ticks_slot: 0)
+}
+
+#[arithmetic(unchecked)]
+pub fn read_observation_tick_at(_ tick: i256, ticks_slot: u256) -> (i256, u256, u32, bool)
+uses (evm: mut Evm)
+{
+    let slot3_word = slot3_at(tick, ticks_slot: ticks_slot)
+    (
+        decode_signed(slot3_word, bits: 56),
+        (slot3_word >> 56) & MASK_U160,
+        ((slot3_word >> 216) & MAX_U32).downcast_unchecked(),
+        ((slot3_word >> 248) & 0xff) != 0,
+    )
 }
 
 #[arithmetic(unchecked)]

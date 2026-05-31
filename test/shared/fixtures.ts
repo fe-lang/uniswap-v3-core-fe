@@ -16,8 +16,7 @@ interface FactoryFixture {
 
 async function factoryFixture(): Promise<FactoryFixture> {
   const factoryFactory = await getContractFactory('UniswapV3Factory')
-  const deployArgs = process.env.FE_ARTIFACTS === '1' ? [(await getContractFactory('UniswapV3Pool')).bytecode] : []
-  const factory = (await factoryFactory.deploy(...deployArgs)) as UniswapV3Factory
+  const factory = (await factoryFactory.deploy()) as UniswapV3Factory
   return { factory }
 }
 
@@ -78,23 +77,13 @@ export const poolFixture: Fixture<PoolFixture> = async function (): Promise<Pool
     swapTargetRouter,
     createPool: async (fee, tickSpacing, firstToken = token0, secondToken = token1) => {
       const mockTimePoolDeployer = (await MockTimeUniswapV3PoolDeployerFactory.deploy()) as MockTimeUniswapV3PoolDeployer
-      const tx =
-        process.env.FE_ARTIFACTS === '1'
-          ? await (mockTimePoolDeployer as any).deploy(
-              factory.address,
-              firstToken.address,
-              secondToken.address,
-              fee,
-              tickSpacing,
-              MockTimeUniswapV3PoolFactory.bytecode
-            )
-          : await mockTimePoolDeployer.deploy(
-              factory.address,
-              firstToken.address,
-              secondToken.address,
-              fee,
-              tickSpacing
-            )
+      const tx = await mockTimePoolDeployer.deploy(
+        factory.address,
+        firstToken.address,
+        secondToken.address,
+        fee,
+        tickSpacing
+      )
 
       const receipt = await tx.wait()
       const poolAddress = receipt.events?.[0].args?.pool as string
