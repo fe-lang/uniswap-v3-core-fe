@@ -1363,17 +1363,18 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 }
                 amount_out_total = add_u256(a: amount_out_total, b: amount_out)
 
-                let protocol_fee_delta = if fee_protocol == 0 {
-                    0
+                let fee_amount_after_protocol = if fee_protocol == 0 {
+                    fee_amount
                 } else {
-                    fee_amount / (fee_protocol as u256)
+                    let protocol_fee_delta = fee_amount / (fee_protocol as u256)
+                    protocol_fees = add_u256(a: protocol_fees, b: protocol_fee_delta)
+                    fee_amount - protocol_fee_delta
                 }
-                protocol_fees = add_u256(a: protocol_fees, b: protocol_fee_delta)
                 if liquidity_current > 0 {
                     fee_growth_global_x128 = add_u256(
                         a: fee_growth_global_x128,
                         b: mul_div(
-                            fee_amount - protocol_fee_delta,
+                            fee_amount_after_protocol,
                             Q128,
                             denominator: liquidity_current as u256,
                         ),
@@ -1428,6 +1429,44 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 }
             }
 
+            if tick_current != tick_start as i256 {
+                if !computed_latest_observation {
+                    let observation = current_observation(
+                        current_time,
+                        block_timestamp: store.observation0_block_timestamp,
+                        tick_cumulative: store.observation0_tick_cumulative,
+                        tick_current: tick_start,
+                        seconds_per_liquidity_cumulative_x128: store
+                            .observation0_seconds_per_liquidity_cumulative_x128,
+                        liquidity: store.liquidity,
+                    )
+                    tick_cumulative = observation.0
+                    seconds_per_liquidity_cumulative_x128 = observation.1
+                }
+                store.observation0_block_timestamp = current_time
+                store.observation0_tick_cumulative = tick_cumulative.downcast_unchecked()
+                store
+                    .observation0_seconds_per_liquidity_cumulative_x128 = seconds_per_liquidity_cumulative_x128
+                store.sqrt_price_x96 = sqrt_price_x96
+                store.tick = tick_current.downcast_unchecked()
+            } else if sqrt_price_x96 != sqrt_price_start_x96 {
+                store.sqrt_price_x96 = sqrt_price_x96
+            }
+            if liquidity_current != store.liquidity {
+                store.liquidity = liquidity_current
+            }
+            if zero_for_one {
+                store.fee_growth_global0_x128 = fee_growth_global_x128
+                if protocol_fees > 0 {
+                    store.protocol_fee0 += protocol_fees.downcast_unchecked()
+                }
+            } else {
+                store.fee_growth_global1_x128 = fee_growth_global_x128
+                if protocol_fees > 0 {
+                    store.protocol_fee1 += protocol_fees.downcast_unchecked()
+                }
+            }
+
             let balance_before = balance_of(token: input_token, account: ctx.address())
             if amount_out_total > 0 {
                 transfer_scratch(
@@ -1459,40 +1498,6 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 code: MSG_IIA,
                 len: 3,
             )
-
-            if zero_for_one {
-                store.protocol_fee0 += protocol_fees.downcast_unchecked()
-                store.fee_growth_global0_x128 = fee_growth_global_x128
-            } else {
-                store.protocol_fee1 += protocol_fees.downcast_unchecked()
-                store.fee_growth_global1_x128 = fee_growth_global_x128
-            }
-            if liquidity_current != store.liquidity {
-                store.liquidity = liquidity_current
-            }
-            if tick_current != tick_start as i256 {
-                if !computed_latest_observation {
-                    let observation = current_observation(
-                        current_time,
-                        block_timestamp: store.observation0_block_timestamp,
-                        tick_cumulative: store.observation0_tick_cumulative,
-                        tick_current: tick_start,
-                        seconds_per_liquidity_cumulative_x128: store
-                            .observation0_seconds_per_liquidity_cumulative_x128,
-                        liquidity: store.liquidity,
-                    )
-                    tick_cumulative = observation.0
-                    seconds_per_liquidity_cumulative_x128 = observation.1
-                }
-                store.observation0_block_timestamp = current_time
-                store.observation0_tick_cumulative = tick_cumulative.downcast_unchecked()
-                store
-                    .observation0_seconds_per_liquidity_cumulative_x128 = seconds_per_liquidity_cumulative_x128
-                store.sqrt_price_x96 = sqrt_price_x96
-                store.tick = tick_current.downcast_unchecked()
-            } else if sqrt_price_x96 != sqrt_price_start_x96 {
-                store.sqrt_price_x96 = sqrt_price_x96
-            }
             evm.mstore(addr: 0, value: amount0_delta)
             evm.mstore(addr: 32, value: amount1_delta)
             evm.mstore(addr: 64, value: sqrt_price_x96)
