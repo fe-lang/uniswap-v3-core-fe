@@ -1589,24 +1589,27 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             let liquidity_delta = decode_i128_word(evm.calldataload(100))
             check_ticks(mut evm, tick_lower, tick_upper: tick_upper)
 
-            let current_time: u32 = store.time.downcast_unchecked()
-            let time_delta = current_time - store.observation0_block_timestamp
-            let tick_cumulative = current_tick_cumulative(
-                tick_cumulative: store.observation0_tick_cumulative,
-                tick_current: store.tick,
-                time_delta,
-            )
-            let seconds_per_liquidity_cumulative_x128 = current_seconds_per_liquidity(
-                seconds_per_liquidity_cumulative_x128: store
-                    .observation0_seconds_per_liquidity_cumulative_x128,
-                time_delta,
-                liquidity: store.liquidity,
-            )
             let tick_current_i = store.tick as i256
 
+            let mut current_time: u32 = 0
+            let mut tick_cumulative: i256 = 0
+            let mut seconds_per_liquidity_cumulative_x128: u256 = 0
             let mut flipped_lower = false
             let mut flipped_upper = false
             if liquidity_delta != 0 {
+                current_time = store.time.downcast_unchecked()
+                let time_delta = current_time - store.observation0_block_timestamp
+                tick_cumulative = current_tick_cumulative(
+                    tick_cumulative: store.observation0_tick_cumulative,
+                    tick_current: store.tick,
+                    time_delta,
+                )
+                seconds_per_liquidity_cumulative_x128 = current_seconds_per_liquidity(
+                    seconds_per_liquidity_cumulative_x128: store
+                        .observation0_seconds_per_liquidity_cumulative_x128,
+                    time_delta,
+                    liquidity: store.liquidity,
+                )
                 flipped_lower = tick::update_at(
                     tick: tick_lower,
                     tick_current: tick_current_i,
@@ -1679,55 +1682,59 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 }
             }
 
-            let amount: u128 = if liquidity_delta < 0 {
-                (0 - (liquidity_delta as i256)).downcast_unchecked()
-            } else {
-                liquidity_delta.downcast_unchecked()
-            }
-            let round_up = liquidity_delta > 0
-            let sqrt_ratio_lower_x96 = get_sqrt_ratio_at_tick(tick: tick_lower)
-            let sqrt_ratio_upper_x96 = get_sqrt_ratio_at_tick(tick: tick_upper)
-            let amount0 = if tick_current_i < tick_lower {
-                get_amount0_delta(
-                    sqrt_ratio_a_x96: sqrt_ratio_lower_x96,
-                    sqrt_ratio_b_x96: sqrt_ratio_upper_x96,
-                    amount,
-                    round_up,
-                )
-            } else if tick_current_i < tick_upper {
-                get_amount0_delta(
-                    sqrt_ratio_a_x96: store.sqrt_price_x96,
-                    sqrt_ratio_b_x96: sqrt_ratio_upper_x96,
-                    amount,
-                    round_up,
-                )
-            } else {
-                0
-            }
-            let amount1 = if tick_current_i < tick_lower {
-                0
-            } else if tick_current_i < tick_upper {
-                get_amount1_delta(
-                    sqrt_ratio_a_x96: sqrt_ratio_lower_x96,
-                    sqrt_ratio_b_x96: store.sqrt_price_x96,
-                    amount,
-                    round_up,
-                )
-            } else {
-                get_amount1_delta(
-                    sqrt_ratio_a_x96: sqrt_ratio_lower_x96,
-                    sqrt_ratio_b_x96: sqrt_ratio_upper_x96,
-                    amount,
-                    round_up,
-                )
-            }
+            let mut amount0: u256 = 0
+            let mut amount1: u256 = 0
+            if liquidity_delta != 0 {
+                let amount: u128 = if liquidity_delta < 0 {
+                    (0 - (liquidity_delta as i256)).downcast_unchecked()
+                } else {
+                    liquidity_delta.downcast_unchecked()
+                }
+                let round_up = liquidity_delta > 0
+                let sqrt_ratio_lower_x96 = get_sqrt_ratio_at_tick(tick: tick_lower)
+                let sqrt_ratio_upper_x96 = get_sqrt_ratio_at_tick(tick: tick_upper)
+                amount0 = if tick_current_i < tick_lower {
+                    get_amount0_delta(
+                        sqrt_ratio_a_x96: sqrt_ratio_lower_x96,
+                        sqrt_ratio_b_x96: sqrt_ratio_upper_x96,
+                        amount,
+                        round_up,
+                    )
+                } else if tick_current_i < tick_upper {
+                    get_amount0_delta(
+                        sqrt_ratio_a_x96: store.sqrt_price_x96,
+                        sqrt_ratio_b_x96: sqrt_ratio_upper_x96,
+                        amount,
+                        round_up,
+                    )
+                } else {
+                    0
+                }
+                amount1 = if tick_current_i < tick_lower {
+                    0
+                } else if tick_current_i < tick_upper {
+                    get_amount1_delta(
+                        sqrt_ratio_a_x96: sqrt_ratio_lower_x96,
+                        sqrt_ratio_b_x96: store.sqrt_price_x96,
+                        amount,
+                        round_up,
+                    )
+                } else {
+                    get_amount1_delta(
+                        sqrt_ratio_a_x96: sqrt_ratio_lower_x96,
+                        sqrt_ratio_b_x96: sqrt_ratio_upper_x96,
+                        amount,
+                        round_up,
+                    )
+                }
 
-            if tick_current_i >= tick_lower && tick_current_i < tick_upper {
-                store.observation0_block_timestamp = current_time
-                store.observation0_tick_cumulative = tick_cumulative.downcast_unchecked()
-                store
-                    .observation0_seconds_per_liquidity_cumulative_x128 = seconds_per_liquidity_cumulative_x128
-                store.liquidity = add_delta(store.liquidity, liquidity_delta)
+                if tick_current_i >= tick_lower && tick_current_i < tick_upper {
+                    store.observation0_block_timestamp = current_time
+                    store.observation0_tick_cumulative = tick_cumulative.downcast_unchecked()
+                    store
+                        .observation0_seconds_per_liquidity_cumulative_x128 = seconds_per_liquidity_cumulative_x128
+                    store.liquidity = add_delta(store.liquidity, liquidity_delta)
+                }
             }
 
             if liquidity_delta < 0 && (amount0 > 0 || amount1 > 0) {
