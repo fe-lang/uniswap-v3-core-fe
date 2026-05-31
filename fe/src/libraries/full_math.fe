@@ -4,7 +4,6 @@ use std::evm::crypto::mulmod
 const U256_MAX: u256 = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
 
 #[arithmetic(unchecked)]
-#[inline(always)]
 pub fn mul_div(_ a: u256, _ b: u256, denominator: u256) -> u256 {
     let mm = mulmod(a, b, U256_MAX)
     let mut prod0 = a * b
@@ -40,7 +39,6 @@ pub fn mul_div(_ a: u256, _ b: u256, denominator: u256) -> u256 {
 }
 
 #[arithmetic(unchecked)]
-#[inline(always)]
 pub fn mul_div_rounding_up(_ a: u256, _ b: u256, denominator: u256) -> u256 {
     let mut result = mul_div(a, b, denominator)
     if mulmod(a, b, denominator) > 0 {
