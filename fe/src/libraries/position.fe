@@ -1,4 +1,4 @@
-use std::evm::{mem, Address, Evm, RawMem, RawStorage}
+use std::evm::{Address, Evm, RawMem, RawStorage}
 use super::fixed_point_128::Q128
 use super::full_math::mul_div
 use super::liquidity_math::add_delta
@@ -20,7 +20,7 @@ fn checked_int24_word(_ value: i256) -> u256 {
 pub fn position_key(owner: Address, tick_lower: i256, tick_upper: i256) -> u256
 uses (evm: mut Evm)
 {
-    let ptr = mem::alloc(0)
+    let ptr = 0
     let word = (owner.inner << 96)
         | (checked_int24_word(tick_lower) << 72)
         | (checked_int24_word(tick_upper) << 48)
@@ -30,7 +30,7 @@ uses (evm: mut Evm)
 
 #[arithmetic(unchecked)]
 pub fn mapping_slot(key: u256, positions_slot: u256) -> u256 uses (evm: mut Evm) {
-    let ptr = mem::alloc(0)
+    let ptr = 0
     evm.mstore(addr: ptr, value: key)
     evm.mstore(addr: ptr + 32, value: positions_slot)
     evm.keccak256(offset: ptr, len: 64)

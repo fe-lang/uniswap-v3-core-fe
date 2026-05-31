@@ -14,22 +14,9 @@ const ORIGINAL_SLOT: u256 = 7
 
 const MASK_U24: u256 = 0xffffff
 const MASK_U160: u256 = 0xffffffffffffffffffffffffffffffffffffffff
-const MIN_I24: i256 = -0x800000
-const MAX_I24: i256 = 0x7fffff
 const OWNER_CHANGED_TOPIC: u256 = 0xb532073b38c83145e3e5135377a08bf9aab55bc0fd7c1179cd4fb995d2a5159c
 const POOL_CREATED_TOPIC: u256 = 0x783cca1c0412dd0d695e784568c96da2e9c22ff989357a2e8b1d9b2b4e6b7118
 const FEE_AMOUNT_ENABLED_TOPIC: u256 = 0xc66a3fdf07232cdd185febcc6579d408c241b47ae2f9907d84be655141eeaecc
-
-fn checked_fee(_ fee: Uint24) -> u32 {
-    assert(fee.val <= MASK_U24.downcast_unchecked())
-    fee.val
-}
-
-fn checked_int24(_ tick_spacing: Int24) -> i32 {
-    let value = tick_spacing.val as i256
-    assert(value >= MIN_I24 && value <= MAX_I24)
-    tick_spacing.val
-}
 
 fn int24_word(_ value: i32) -> u256 {
     int_key(value as i256) & MASK_U24
@@ -59,17 +46,14 @@ fn store_address(slot: u256, value: Address) uses (evm: mut Evm) {
 }
 
 fn mapping_slot(key: u256, slot: u256) -> u256 uses (evm: mut Evm) {
-    let ptr = std::evm::mem::alloc(0)
+    let ptr = 0
     evm.mstore(addr: ptr, value: key)
     evm.mstore(addr: ptr + 32, value: slot)
     evm.keccak256(offset: ptr, len: 64)
 }
 
 fn fee_amount_tick_spacing_slot(_ fee: Uint24) -> u256 uses (evm: mut Evm) {
-    mapping_slot(
-        key: checked_fee(fee) as u256,
-        slot: FEE_AMOUNT_TICK_SPACING_SLOT,
-    )
+    mapping_slot(key: fee.val as u256, slot: FEE_AMOUNT_TICK_SPACING_SLOT)
 }
 
 fn get_pool_slot(token0: Address, token1: Address, fee: Uint24) -> u256
@@ -77,7 +61,7 @@ uses (evm: mut Evm)
 {
     let token0_slot = mapping_slot(key: token0.inner, slot: GET_POOL_SLOT)
     let token1_slot = mapping_slot(key: token1.inner, slot: token0_slot)
-    mapping_slot(key: checked_fee(fee) as u256, slot: token1_slot)
+    mapping_slot(key: fee.val as u256, slot: token1_slot)
 }
 
 fn fee_amount_tick_spacing(_ fee: Uint24) -> Int24 uses (evm: mut Evm) {
@@ -87,8 +71,6 @@ fn fee_amount_tick_spacing(_ fee: Uint24) -> Int24 uses (evm: mut Evm) {
 fn set_fee_amount_tick_spacing(fee: Uint24, tick_spacing: Int24)
 uses (evm: mut Evm)
 {
-    checked_fee(fee)
-    checked_int24(tick_spacing)
     evm.sstore(
         slot: fee_amount_tick_spacing_slot(fee),
         value: int24_word(tick_spacing.val),
@@ -121,7 +103,7 @@ uses (evm: mut Evm)
     store_address(slot: PARAMETERS_TOKEN1_SLOT, value: token1)
     evm.sstore(
         slot: PARAMETERS_PACKED_SLOT,
-        value: (checked_fee(fee) as u256) | (int24_word(checked_int24(tick_spacing)) << 24),
+        value: (fee.val as u256) | (int24_word(tick_spacing.val) << 24),
     )
 }
 
@@ -135,10 +117,10 @@ fn clear_parameters() uses (evm: mut Evm) {
 fn pool_salt(token0: Address, token1: Address, fee: Uint24) -> u256
 uses (evm: mut Evm)
 {
-    let ptr = std::evm::mem::alloc(0)
+    let ptr = 0
     evm.mstore(addr: ptr, value: token0.inner)
     evm.mstore(addr: ptr + 32, value: token1.inner)
-    evm.mstore(addr: ptr + 64, value: checked_fee(fee) as u256)
+    evm.mstore(addr: ptr + 64, value: fee.val as u256)
     evm.keccak256(offset: ptr, len: 96)
 }
 
@@ -165,8 +147,8 @@ uses (evm: mut Evm)
         offset: 0,
         len: 0,
         topic0: FEE_AMOUNT_ENABLED_TOPIC,
-        topic1: checked_fee(fee) as u256,
-        topic2: int24_abi_word(checked_int24(tick_spacing)),
+        topic1: fee.val as u256,
+        topic2: int24_abi_word(tick_spacing.val),
     )
 }
 
@@ -179,11 +161,8 @@ fn emit_pool_created(
 )
 uses (evm: mut Evm)
 {
-    let ptr = std::evm::mem::alloc(0)
-    evm.mstore(
-        addr: ptr,
-        value: int24_abi_word(checked_int24(tick_spacing)),
-    )
+    let ptr = 0
+    evm.mstore(addr: ptr, value: int24_abi_word(tick_spacing.val))
     evm.mstore(addr: ptr + 32, value: pool.inner)
     evm.log4(
         offset: ptr,
@@ -191,7 +170,7 @@ uses (evm: mut Evm)
         topic0: POOL_CREATED_TOPIC,
         topic1: token0.inner,
         topic2: token1.inner,
-        topic3: checked_fee(fee) as u256,
+        topic3: fee.val as u256,
     )
 }
 
@@ -278,7 +257,8 @@ pub contract UniswapV3Factory uses (ctx: Ctx, evm: mut Evm) {
             assert(token0 != Address::zero())
             let tick_spacing = fee_amount_tick_spacing(fee)
             assert(tick_spacing.val != 0)
-            assert(get_pool(token0, token1, fee) == Address::zero())
+            let pool_slot = get_pool_slot(token0, token1, fee)
+            assert(address_at(pool_slot) == Address::zero())
             set_parameters(
                 factory: ctx.address(),
                 token0,
@@ -290,7 +270,7 @@ pub contract UniswapV3Factory uses (ctx: Ctx, evm: mut Evm) {
                 .create2<UniswapV3Pool>(value: 0, args: (), salt: pool_salt(token0, token1, fee))
             assert(pool.inner != 0)
             clear_parameters()
-            set_pool(token0, token1, fee, pool)
+            store_address(slot: pool_slot, value: pool)
             set_pool(token0: token1, token1: token0, fee, pool)
             emit_pool_created(token0, token1, fee, tick_spacing: tick_spacing, pool)
             pool.inner
@@ -305,11 +285,12 @@ pub contract UniswapV3Factory uses (ctx: Ctx, evm: mut Evm) {
 
         EnableFeeAmount { fee, tickSpacing } uses (ctx, mut evm) {
             assert(ctx.caller() == address_at(OWNER_SLOT))
-            assert(checked_fee(fee) < 1000000)
-            let tick_spacing = checked_int24(tickSpacing)
+            assert(fee.val < 1000000)
+            let tick_spacing = tickSpacing.val
             assert(tick_spacing > 0 && tick_spacing < 16384)
-            assert(fee_amount_tick_spacing(fee).val == 0)
-            set_fee_amount_tick_spacing(fee, tick_spacing: tickSpacing)
+            let fee_slot = fee_amount_tick_spacing_slot(fee)
+            assert(evm.sload(fee_slot) == 0)
+            evm.sstore(slot: fee_slot, value: int24_word(tick_spacing))
             emit_fee_amount_enabled(fee, tick_spacing: tickSpacing)
         }
     }

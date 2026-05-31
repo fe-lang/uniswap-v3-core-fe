@@ -1,5 +1,6 @@
 use std::abi::sol::{self, Int24}
-use std::evm::{mem, Evm, RawMem, RawOps, RawStorage}
+use std::evm::ops::signextend
+use std::evm::{Evm, RawMem, RawOps, RawStorage}
 use super::liquidity_math::add_delta
 use super::revert_reason::{require_short, MSG_LO}
 use super::safe_cast::to_int128
@@ -25,7 +26,7 @@ const U256_HALF_MAX: u256 = 0x7fffffffffffffffffffffffffffffffffffffffffffffffff
 
 #[arithmetic(unchecked)]
 fn mapping_slot_at(_ tick: i256, ticks_slot: u256) -> u256 uses (evm: mut Evm) {
-    let ptr = mem::alloc(0)
+    let ptr = 0
     evm.mstore(addr: ptr, value: int_key(tick))
     evm.mstore(addr: ptr + 32, value: ticks_slot)
     evm.keccak256(offset: ptr, len: 64)
@@ -41,18 +42,16 @@ fn signed_word(_ value: i256, bits: u256) -> u256 {
     int_key(value) & ((1 << bits) - 1)
 }
 
-#[arithmetic(unchecked)]
-fn decode_signed(_ word: u256, bits: u256) -> i256 {
-    let mask = (1 << bits) - 1
-    let value = word & mask
-    let sign_bit = 1 << (bits - 1)
-    if (value & sign_bit) == 0 {
-        return value.downcast_unchecked()
-    }
+fn decode_i24_word(_ word: u256) -> i256 {
+    signextend(byte: 2, value: word).downcast_unchecked()
+}
 
-    let magnitude = ((mask - value) + 1) & mask
-    let magnitude_i: i256 = magnitude.downcast_unchecked()
-    0 - magnitude_i
+fn decode_i56_word(_ word: u256) -> i256 {
+    signextend(byte: 6, value: word).downcast_unchecked()
+}
+
+fn decode_i128_word(_ word: u256) -> i256 {
+    signextend(byte: 15, value: word).downcast_unchecked()
 }
 
 #[arithmetic(unchecked)]
@@ -174,7 +173,7 @@ uses (evm: mut Evm)
 }
 
 fn liquidity_net(_ tick: i256) -> i128 uses (evm: mut Evm) {
-    let value = decode_signed(slot0(tick) >> 128, bits: 128)
+    let value = decode_i128_word(slot0(tick) >> 128)
     value.downcast_unchecked()
 }
 
@@ -182,19 +181,19 @@ fn liquidity_net(_ tick: i256) -> i128 uses (evm: mut Evm) {
 fn liquidity_net_at(_ tick: i256, ticks_slot: u256) -> i128
 uses (evm: mut Evm)
 {
-    let value = decode_signed(slot0_at(tick, ticks_slot: ticks_slot) >> 128, bits: 128)
+    let value = decode_i128_word(slot0_at(tick, ticks_slot: ticks_slot) >> 128)
     value.downcast_unchecked()
 }
 
 fn tick_cumulative_outside(_ tick: i256) -> i256 uses (evm: mut Evm) {
-    decode_signed(slot3(tick), bits: 56)
+    decode_i56_word(slot3(tick))
 }
 
 #[arithmetic(unchecked)]
 fn tick_cumulative_outside_at(_ tick: i256, ticks_slot: u256) -> i256
 uses (evm: mut Evm)
 {
-    decode_signed(slot3_at(tick, ticks_slot: ticks_slot), bits: 56)
+    decode_i56_word(slot3_at(tick, ticks_slot: ticks_slot))
 }
 
 fn seconds_per_liquidity_outside_x128(_ tick: i256) -> u256
@@ -231,7 +230,7 @@ fn initialized_at(_ tick: i256, ticks_slot: u256) -> bool uses (evm: mut Evm) {
 }
 
 fn overflow_current_tick() -> i256 uses (evm: mut Evm) {
-    decode_signed(evm.sload(OVERFLOW_TICK_SLOT), bits: 24)
+    decode_i24_word(evm.sload(OVERFLOW_TICK_SLOT))
 }
 
 fn set_overflow_current_tick(_ tick: i256) uses (evm: mut Evm) {
@@ -415,13 +414,13 @@ uses (evm: mut Evm)
     let base = mapping_slot_at(tick, ticks_slot: ticks_slot)
     let slot0_word = evm.sload(base)
     let slot3_word = evm.sload(base + 3)
-    let liquidity_net_word = decode_signed(slot0_word >> 128, bits: 128)
+    let liquidity_net_word = decode_i128_word(slot0_word >> 128)
     (
         (slot0_word & MASK_U128).downcast_unchecked(),
         liquidity_net_word.downcast_unchecked(),
         evm.sload(base + 1),
         evm.sload(base + 2),
-        decode_signed(slot3_word, bits: 56),
+        decode_i56_word(slot3_word),
         (slot3_word >> 56) & MASK_U160,
         ((slot3_word >> 216) & MAX_U32).downcast_unchecked(),
         ((slot3_word >> 248) & 0xff) != 0,
@@ -440,7 +439,7 @@ uses (evm: mut Evm)
 {
     let slot3_word = slot3_at(tick, ticks_slot: ticks_slot)
     (
-        decode_signed(slot3_word, bits: 56),
+        decode_i56_word(slot3_word),
         (slot3_word >> 56) & MASK_U160,
         ((slot3_word >> 216) & MAX_U32).downcast_unchecked(),
         ((slot3_word >> 248) & 0xff) != 0,
@@ -627,7 +626,7 @@ uses (evm: mut Evm)
         value: fee_growth_global1_x128 - evm.sload(base + 2),
     )
 
-    let tick_cumulative_outside = decode_signed(slot3_word, bits: 56)
+    let tick_cumulative_outside = decode_i56_word(slot3_word)
     let seconds_per_liquidity_outside = (slot3_word >> 56) & MASK_U160
     let seconds_outside_value: u32 = ((slot3_word >> 216) & MAX_U32).downcast_unchecked()
     let word = signed_word(tick_cumulative - tick_cumulative_outside, bits: 56)
@@ -636,7 +635,7 @@ uses (evm: mut Evm)
         | (((slot3_word >> 248) & 0xff) << 248)
     evm.sstore(slot: base + 3, value: word)
 
-    let liquidity_net = decode_signed(slot0_word >> 128, bits: 128)
+    let liquidity_net = decode_i128_word(slot0_word >> 128)
     liquidity_net.downcast_unchecked()
 }
 

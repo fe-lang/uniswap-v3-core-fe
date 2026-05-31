@@ -1,5 +1,5 @@
 use std::abi::sol::{self, Int24}
-use std::evm::{mem, Evm, RawMem, RawStorage, StorageMap}
+use std::evm::{Evm, RawMem, RawStorage, StorageMap}
 use super::bit_math::{least_significant_bit, most_significant_bit}
 
 const U256_MAX: u256 = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
@@ -19,7 +19,7 @@ fn position(_ tick: i256) -> (i256, u256) {
 
 #[arithmetic(unchecked)]
 pub fn word_slot(word_pos: i256, bitmap_slot: u256) -> u256 uses (evm: mut Evm) {
-    let ptr = mem::alloc(0)
+    let ptr = 0
     evm.mstore(addr: ptr, value: int_key(word_pos))
     evm.mstore(addr: ptr + 32, value: bitmap_slot)
     evm.keccak256(offset: ptr, len: 64)
@@ -61,7 +61,8 @@ uses (bitmap: StorageMap<u256, u256>)
 
     if lte {
         let (word_pos, bit_pos) = position(compressed)
-        let mask = (1 << bit_pos) - 1 + (1 << bit_pos)
+        let bit = 1 << bit_pos
+        let mask = (bit - 1) + bit
         let masked = bitmap.get(key: int_key(word_pos)) & mask
         let initialized = masked != 0
 
@@ -77,7 +78,7 @@ uses (bitmap: StorageMap<u256, u256>)
     }
 
     let (word_pos, bit_pos) = position(compressed + 1)
-    let mask = U256_MAX - ((1 << bit_pos) - 1)
+    let mask = !((1 << bit_pos) - 1)
     let masked = bitmap.get(key: int_key(word_pos)) & mask
     let initialized = masked != 0
 
@@ -108,7 +109,8 @@ uses (evm: mut Evm)
 
     if lte {
         let (word_pos, bit_pos) = position(compressed)
-        let mask = (1 << bit_pos) - 1 + (1 << bit_pos)
+        let bit = 1 << bit_pos
+        let mask = (bit - 1) + bit
         let masked = evm.sload(word_slot(word_pos, bitmap_slot: bitmap_slot)) & mask
         if masked != 0 {
             let delta: i256 = (bit_pos - (most_significant_bit(masked) as u256))
@@ -121,7 +123,7 @@ uses (evm: mut Evm)
     }
 
     let (word_pos, bit_pos) = position(compressed + 1)
-    let mask = U256_MAX - ((1 << bit_pos) - 1)
+    let mask = !((1 << bit_pos) - 1)
     let masked = evm.sload(word_slot(word_pos, bitmap_slot: bitmap_slot)) & mask
     if masked != 0 {
         let delta: i256 = ((least_significant_bit(masked) as u256) - bit_pos).downcast_unchecked()

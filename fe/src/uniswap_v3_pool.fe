@@ -1,3 +1,4 @@
+use std::evm::ops::signextend
 use std::evm::{Address, Call, Ctx, Evm, Log, RawMem, RawOps}
 use super::libraries::fixed_point_128::Q128
 use super::libraries::fixed_point_96::Q96
@@ -42,7 +43,6 @@ const FLASH_TOPIC: u256 = 0xbdbdb71d7860376ba52b25a5028beea23581364a40522f6bcfb8
 const SWAP_TOPIC: u256 = 0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67
 const FLASH_CALLBACK_SELECTOR: u256 = 0xe9cbafb0
 const SWAP_CALLBACK_SELECTOR: u256 = 0xfa461e33
-const SWAP_STEP_SELECTOR: u256 = 0x8f6f4f02
 const ERROR_STRING_SELECTOR_WORD: u256 = 0x08c379a000000000000000000000000000000000000000000000000000000000
 const MSG_TLU: u256 = 0x544c550000000000000000000000000000000000000000000000000000000000
 const MSG_TLM: u256 = 0x544c4d0000000000000000000000000000000000000000000000000000000000
@@ -136,9 +136,6 @@ msg UniswapV3PoolMsg {
 
     #[selector = 0x8f6f4f01]
     ModifyPosition,
-
-    #[selector = 0x8f6f4f02]
-    SwapStep,
 }
 
 struct PoolStore {
@@ -172,14 +169,7 @@ fn int24_abi_word(_ value: i32) -> u256 {
 
 #[arithmetic(unchecked)]
 fn decode_int24_word(_ word: u256) -> i256 {
-    let value = word & 0xffffff
-    if (value & 0x800000) == 0 {
-        return value.downcast_unchecked()
-    }
-
-    let magnitude = ((0xffffff - value) + 1) & 0xffffff
-    let magnitude_i: i256 = magnitude.downcast_unchecked()
-    0 - magnitude_i
+    signextend(byte: 2, value: word).downcast_unchecked()
 }
 
 #[arithmetic(unchecked)]
@@ -253,6 +243,26 @@ fn current_seconds_per_liquidity(
 }
 
 #[arithmetic(unchecked)]
+fn current_observation(
+    current_time: u32,
+    block_timestamp: u32,
+    tick_cumulative: i64,
+    tick_current: i32,
+    seconds_per_liquidity_cumulative_x128: u256,
+    liquidity: u128,
+) -> (i256, u256) {
+    let time_delta = current_time - block_timestamp
+    (
+        current_tick_cumulative(tick_cumulative, tick_current, time_delta),
+        current_seconds_per_liquidity(
+            seconds_per_liquidity_cumulative_x128,
+            time_delta,
+            liquidity,
+        ),
+    )
+}
+
+#[arithmetic(unchecked)]
 fn min_u128(_ a: u128, _ b: u128) -> u128 {
     if a < b { return a }
     b
@@ -266,14 +276,7 @@ fn decode_u128_word(_ word: u256) -> u128 {
 
 #[arithmetic(unchecked)]
 fn decode_i128_word(_ word: u256) -> i128 {
-    let value = word & MAX_U128_WORD
-    if (value & 0x80000000000000000000000000000000) == 0 {
-        return value.downcast_unchecked()
-    }
-
-    let magnitude = ((MAX_U128_WORD - value) + 1) & MAX_U128_WORD
-    let magnitude_i: i256 = magnitude.downcast_unchecked()
-    (0 - magnitude_i).downcast_unchecked()
+    signextend(byte: 15, value: word).downcast_unchecked()
 }
 
 #[arithmetic(unchecked)]
@@ -462,33 +465,138 @@ uses (call: mut Call, evm: mut Evm)
 
 #[arithmetic(unchecked)]
 fn call_swap_step(
-    pool: Address,
     sqrt_ratio_current_x96: u256,
     sqrt_ratio_target_x96: u256,
     liquidity: u128,
     amount_remaining: u256,
     fee_pips: u32,
-) -> (u256, u256, u256, u256)
-uses (call: mut Call, evm: mut Evm)
-{
-    let ptr = 256
-    evm.mstore(addr: ptr, value: SWAP_STEP_SELECTOR << 224)
-    evm.mstore(addr: ptr + 4, value: sqrt_ratio_current_x96)
-    evm.mstore(addr: ptr + 36, value: sqrt_ratio_target_x96)
-    evm.mstore(addr: ptr + 68, value: liquidity as u256)
-    evm.mstore(addr: ptr + 100, value: amount_remaining)
-    evm.mstore(addr: ptr + 132, value: fee_pips as u256)
-    assert(
-        call.raw_call(
-            addr: pool,
-            gas: evm.gas(),
-            value: 0,
-            args_offset: ptr,
-            args_len: 164,
-        ),
-    )
-    evm.returndatacopy(dest: ptr, offset: 0, len: 128)
-    (evm.mload(ptr), evm.mload(ptr + 32), evm.mload(ptr + 64), evm.mload(ptr + 96))
+) -> (u256, u256, u256, u256) {
+    let zero_for_one = sqrt_ratio_current_x96 >= sqrt_ratio_target_x96
+    let exact_input = amount_remaining <= MAX_I256_WORD
+    let amount_remaining_abs = if exact_input {
+        amount_remaining
+    } else {
+        sub_u256(a: 0, b: amount_remaining)
+    }
+    let mut amount_in: u256 = 0
+    let mut amount_out: u256 = 0
+    let mut sqrt_ratio_next_x96: u256 = 0
+    if exact_input {
+        let amount_remaining_less_fee = mul_div(
+            amount_remaining_abs,
+            1000000 - (fee_pips as u256),
+            denominator: 1000000,
+        )
+        amount_in = if zero_for_one {
+            get_amount0_delta(
+                sqrt_ratio_a_x96: sqrt_ratio_target_x96,
+                sqrt_ratio_b_x96: sqrt_ratio_current_x96,
+                liquidity,
+                round_up: true,
+            )
+        } else {
+            get_amount1_delta(
+                sqrt_ratio_a_x96: sqrt_ratio_current_x96,
+                sqrt_ratio_b_x96: sqrt_ratio_target_x96,
+                liquidity,
+                round_up: true,
+            )
+        }
+        sqrt_ratio_next_x96 = if amount_remaining_less_fee >= amount_in {
+            sqrt_ratio_target_x96
+        } else if zero_for_one {
+            next_sqrt_price_amount0_add(
+                sqrt_p_x96: sqrt_ratio_current_x96,
+                liquidity,
+                amount: amount_remaining_less_fee,
+            )
+        } else {
+            next_sqrt_price_amount1_add(
+                sqrt_p_x96: sqrt_ratio_current_x96,
+                liquidity,
+                amount: amount_remaining_less_fee,
+            )
+        }
+    } else {
+        amount_out = if zero_for_one {
+            get_amount1_delta(
+                sqrt_ratio_a_x96: sqrt_ratio_target_x96,
+                sqrt_ratio_b_x96: sqrt_ratio_current_x96,
+                liquidity,
+                round_up: false,
+            )
+        } else {
+            get_amount0_delta(
+                sqrt_ratio_a_x96: sqrt_ratio_current_x96,
+                sqrt_ratio_b_x96: sqrt_ratio_target_x96,
+                liquidity,
+                round_up: false,
+            )
+        }
+        sqrt_ratio_next_x96 = if amount_remaining_abs >= amount_out {
+            sqrt_ratio_target_x96
+        } else if zero_for_one {
+            next_sqrt_price_amount1_sub(
+                sqrt_p_x96: sqrt_ratio_current_x96,
+                liquidity,
+                amount: amount_remaining_abs,
+            )
+        } else {
+            next_sqrt_price_amount0_sub(
+                sqrt_p_x96: sqrt_ratio_current_x96,
+                liquidity,
+                amount: amount_remaining_abs,
+            )
+        }
+    }
+    let max = sqrt_ratio_next_x96 == sqrt_ratio_target_x96
+    amount_in = if max && exact_input {
+        amount_in
+    } else if zero_for_one {
+        get_amount0_delta(
+            sqrt_ratio_a_x96: sqrt_ratio_next_x96,
+            sqrt_ratio_b_x96: sqrt_ratio_current_x96,
+            liquidity,
+            round_up: true,
+        )
+    } else {
+        get_amount1_delta(
+            sqrt_ratio_a_x96: sqrt_ratio_current_x96,
+            sqrt_ratio_b_x96: sqrt_ratio_next_x96,
+            liquidity,
+            round_up: true,
+        )
+    }
+    amount_out = if max && !exact_input {
+        amount_out
+    } else if zero_for_one {
+        get_amount1_delta(
+            sqrt_ratio_a_x96: sqrt_ratio_next_x96,
+            sqrt_ratio_b_x96: sqrt_ratio_current_x96,
+            liquidity,
+            round_up: false,
+        )
+    } else {
+        get_amount0_delta(
+            sqrt_ratio_a_x96: sqrt_ratio_current_x96,
+            sqrt_ratio_b_x96: sqrt_ratio_next_x96,
+            liquidity,
+            round_up: false,
+        )
+    }
+    if !exact_input && amount_out > amount_remaining_abs {
+        amount_out = amount_remaining_abs
+    }
+    let fee_amount = if exact_input && sqrt_ratio_next_x96 != sqrt_ratio_target_x96 {
+        sub_u256(a: amount_remaining_abs, b: amount_in)
+    } else {
+        mul_div_rounding_up(
+            amount_in,
+            fee_pips as u256,
+            denominator: 1000000 - (fee_pips as u256),
+        )
+    }
+    (sqrt_ratio_next_x96, amount_in, amount_out, fee_amount)
 }
 
 #[arithmetic(unchecked)]
@@ -1178,18 +1286,9 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
             let sqrt_price_start_x96 = store.sqrt_price_x96
             let tick_start = store.tick
             let current_time: u32 = evm.timestamp().downcast_unchecked()
-            let time_delta = current_time - store.observation0_block_timestamp
-            let tick_cumulative = current_tick_cumulative(
-                tick_cumulative: store.observation0_tick_cumulative,
-                tick_current: tick_start,
-                time_delta,
-            )
-            let seconds_per_liquidity_cumulative_x128 = current_seconds_per_liquidity(
-                seconds_per_liquidity_cumulative_x128: store
-                    .observation0_seconds_per_liquidity_cumulative_x128,
-                time_delta,
-                liquidity: store.liquidity,
-            )
+            let mut tick_cumulative: i256 = 0
+            let mut seconds_per_liquidity_cumulative_x128: u256 = 0
+            let mut computed_latest_observation = false
 
             let exact_input = amount_specified <= MAX_I256_WORD
             let mut amount_remaining = amount_specified
@@ -1239,7 +1338,6 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
                 }
 
                 let (sqrt_price_next_x96, amount_in, amount_out, fee_amount) = call_swap_step(
-                    pool: ctx.address(),
                     sqrt_ratio_current_x96: sqrt_price_x96,
                     sqrt_ratio_target_x96: sqrt_price_target_x96,
                     liquidity: liquidity_current,
@@ -1279,6 +1377,20 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
 
                 if sqrt_price_x96 == sqrt_price_next_tick_x96 {
                     if initialized {
+                        if !computed_latest_observation {
+                            let observation = current_observation(
+                                current_time,
+                                block_timestamp: store.observation0_block_timestamp,
+                                tick_cumulative: store.observation0_tick_cumulative,
+                                tick_current: tick_start,
+                                seconds_per_liquidity_cumulative_x128: store
+                                    .observation0_seconds_per_liquidity_cumulative_x128,
+                                liquidity: store.liquidity,
+                            )
+                            tick_cumulative = observation.0
+                            seconds_per_liquidity_cumulative_x128 = observation.1
+                            computed_latest_observation = true
+                        }
                         let mut liquidity_net = tick::cross_at(
                             tick: tick_next,
                             fee_growth_global0_x128: if zero_for_one {
@@ -1354,6 +1466,19 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
                 store.liquidity = liquidity_current
             }
             if tick_current != tick_start as i256 {
+                if !computed_latest_observation {
+                    let observation = current_observation(
+                        current_time,
+                        block_timestamp: store.observation0_block_timestamp,
+                        tick_cumulative: store.observation0_tick_cumulative,
+                        tick_current: tick_start,
+                        seconds_per_liquidity_cumulative_x128: store
+                            .observation0_seconds_per_liquidity_cumulative_x128,
+                        liquidity: store.liquidity,
+                    )
+                    tick_cumulative = observation.0
+                    seconds_per_liquidity_cumulative_x128 = observation.1
+                }
                 store.observation0_block_timestamp = current_time
                 store.observation0_tick_cumulative = tick_cumulative.downcast_unchecked()
                 store
@@ -1386,141 +1511,6 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
                 amount0: sub_u256(a: 0, b: amount_out_total),
                 amount1: amount_owed,
             )
-        }
-
-        SwapStep uses (ctx, mut evm) {
-            assert(ctx.caller().inner == ctx.address().inner)
-            let sqrt_ratio_current_x96 = evm.calldataload(4)
-            let sqrt_ratio_target_x96 = evm.calldataload(36)
-            let liquidity: u128 = evm.calldataload(68).downcast_unchecked()
-            let amount_remaining = evm.calldataload(100)
-            let fee_pips = evm.calldataload(132)
-            let zero_for_one = sqrt_ratio_current_x96 >= sqrt_ratio_target_x96
-            let exact_input = amount_remaining <= MAX_I256_WORD
-            let amount_remaining_abs = if exact_input {
-                amount_remaining
-            } else {
-                sub_u256(a: 0, b: amount_remaining)
-            }
-            let mut amount_in: u256 = 0
-            let mut amount_out: u256 = 0
-            let mut sqrt_ratio_next_x96: u256 = 0
-            if exact_input {
-                let amount_remaining_less_fee = mul_div(
-                    amount_remaining_abs,
-                    1000000 - fee_pips,
-                    denominator: 1000000,
-                )
-                amount_in = if zero_for_one {
-                    get_amount0_delta(
-                        sqrt_ratio_a_x96: sqrt_ratio_target_x96,
-                        sqrt_ratio_b_x96: sqrt_ratio_current_x96,
-                        liquidity,
-                        round_up: true,
-                    )
-                } else {
-                    get_amount1_delta(
-                        sqrt_ratio_a_x96: sqrt_ratio_current_x96,
-                        sqrt_ratio_b_x96: sqrt_ratio_target_x96,
-                        liquidity,
-                        round_up: true,
-                    )
-                }
-                sqrt_ratio_next_x96 = if amount_remaining_less_fee >= amount_in {
-                    sqrt_ratio_target_x96
-                } else if zero_for_one {
-                    next_sqrt_price_amount0_add(
-                        sqrt_p_x96: sqrt_ratio_current_x96,
-                        liquidity,
-                        amount: amount_remaining_less_fee,
-                    )
-                } else {
-                    next_sqrt_price_amount1_add(
-                        sqrt_p_x96: sqrt_ratio_current_x96,
-                        liquidity,
-                        amount: amount_remaining_less_fee,
-                    )
-                }
-            } else {
-                amount_out = if zero_for_one {
-                    get_amount1_delta(
-                        sqrt_ratio_a_x96: sqrt_ratio_target_x96,
-                        sqrt_ratio_b_x96: sqrt_ratio_current_x96,
-                        liquidity,
-                        round_up: false,
-                    )
-                } else {
-                    get_amount0_delta(
-                        sqrt_ratio_a_x96: sqrt_ratio_current_x96,
-                        sqrt_ratio_b_x96: sqrt_ratio_target_x96,
-                        liquidity,
-                        round_up: false,
-                    )
-                }
-                sqrt_ratio_next_x96 = if amount_remaining_abs >= amount_out {
-                    sqrt_ratio_target_x96
-                } else if zero_for_one {
-                    next_sqrt_price_amount1_sub(
-                        sqrt_p_x96: sqrt_ratio_current_x96,
-                        liquidity,
-                        amount: amount_remaining_abs,
-                    )
-                } else {
-                    next_sqrt_price_amount0_sub(
-                        sqrt_p_x96: sqrt_ratio_current_x96,
-                        liquidity,
-                        amount: amount_remaining_abs,
-                    )
-                }
-            }
-            let max = sqrt_ratio_next_x96 == sqrt_ratio_target_x96
-            amount_in = if max && exact_input {
-                amount_in
-            } else if zero_for_one {
-                get_amount0_delta(
-                    sqrt_ratio_a_x96: sqrt_ratio_next_x96,
-                    sqrt_ratio_b_x96: sqrt_ratio_current_x96,
-                    liquidity,
-                    round_up: true,
-                )
-            } else {
-                get_amount1_delta(
-                    sqrt_ratio_a_x96: sqrt_ratio_current_x96,
-                    sqrt_ratio_b_x96: sqrt_ratio_next_x96,
-                    liquidity,
-                    round_up: true,
-                )
-            }
-            amount_out = if max && !exact_input {
-                amount_out
-            } else if zero_for_one {
-                get_amount1_delta(
-                    sqrt_ratio_a_x96: sqrt_ratio_next_x96,
-                    sqrt_ratio_b_x96: sqrt_ratio_current_x96,
-                    liquidity,
-                    round_up: false,
-                )
-            } else {
-                get_amount0_delta(
-                    sqrt_ratio_a_x96: sqrt_ratio_current_x96,
-                    sqrt_ratio_b_x96: sqrt_ratio_next_x96,
-                    liquidity,
-                    round_up: false,
-                )
-            }
-            if !exact_input && amount_out > amount_remaining_abs {
-                amount_out = amount_remaining_abs
-            }
-            let fee_amount = if exact_input && sqrt_ratio_next_x96 != sqrt_ratio_target_x96 {
-                sub_u256(a: amount_remaining_abs, b: amount_in)
-            } else {
-                mul_div_rounding_up(amount_in, fee_pips, denominator: 1000000 - fee_pips)
-            }
-            evm.mstore(addr: 0, value: sqrt_ratio_next_x96)
-            evm.mstore(addr: 32, value: amount_in)
-            evm.mstore(addr: 64, value: amount_out)
-            evm.mstore(addr: 96, value: fee_amount)
-            evm.return_data(offset: 0, len: 128)
         }
 
         Observe uses (mut evm, store) {

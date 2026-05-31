@@ -1,4 +1,5 @@
 use std::abi::sol::{self, Int24}
+use std::evm::ops::signextend
 use std::evm::{mem, Evm, RawMem, RawOps, RawStorage}
 use super::tick_bitmap::int_key
 use super::tick_math::{MAX_TICK, MIN_TICK}
@@ -23,17 +24,12 @@ fn signed_word(_ value: i256, bits: u256) -> u256 {
     int_key(value) & ((1 << bits) - 1)
 }
 
-fn decode_signed(_ word: u256, bits: u256) -> i256 {
-    let mask = (1 << bits) - 1
-    let value = word & mask
-    let sign_bit = 1 << (bits - 1)
-    if (value & sign_bit) == 0 {
-        return value.downcast_unchecked()
-    }
+fn decode_i24_word(_ word: u256) -> i256 {
+    signextend(byte: 2, value: word).downcast_unchecked()
+}
 
-    let magnitude = ((mask - value) + 1) & mask
-    let magnitude_i: i256 = magnitude.downcast_unchecked()
-    0 - magnitude_i
+fn decode_i56_word(_ word: u256) -> i256 {
+    signextend(byte: 6, value: word).downcast_unchecked()
 }
 
 fn observation_slot(_ index: u256) -> u256 {
@@ -45,7 +41,7 @@ fn read_observation(_ index: u256) -> Observation uses (evm: Evm) {
     let word = evm.sload(observation_slot(index))
     Observation {
         block_timestamp: (word & MAX_U32).downcast_unchecked(),
-        tick_cumulative: decode_signed(word >> 32, bits: 56),
+        tick_cumulative: decode_i56_word(word >> 32),
         seconds_per_liquidity_cumulative_x128: (word >> 88) & MAX_U160,
         initialized: ((word >> 248) & 0xff) != 0,
     }
@@ -78,7 +74,7 @@ fn state_time() -> u32 uses (evm: Evm) {
 }
 
 fn state_tick() -> i256 uses (evm: Evm) {
-    decode_signed(state_word() >> 32, bits: 24)
+    decode_i24_word(state_word() >> 32)
 }
 
 fn state_liquidity() -> u128 uses (evm: Evm) {
