@@ -1,5 +1,5 @@
 use std::abi::sol::{self, Int24}
-use std::evm::{Evm, RawMem, RawStorage, StorageMap}
+use std::evm::{Evm, RawMem, RawStorage}
 use super::bit_math::{least_significant_bit, most_significant_bit}
 
 pub fn int_key(_ value: i256) -> u256 {
@@ -20,17 +20,6 @@ pub fn word_slot(word_pos: i256, bitmap_slot: u256) -> u256 uses (evm: mut Evm) 
 }
 
 #[arithmetic(unchecked)]
-pub fn flip_tick(tick: i256, tick_spacing: i256)
-uses (bitmap: mut StorageMap<u256, u256>)
-{
-    assert(tick % tick_spacing == 0)
-    let (word_pos, bit_pos) = position(tick / tick_spacing)
-    let key = int_key(word_pos)
-    let mask = 1 << bit_pos
-    bitmap.set(key: key, value: bitmap.get(key) ^ mask)
-}
-
-#[arithmetic(unchecked)]
 pub fn flip_tick_at(tick: i256, tick_spacing: i256, bitmap_slot: u256)
 uses (evm: mut Evm)
 {
@@ -39,52 +28,6 @@ uses (evm: mut Evm)
     let slot = word_slot(word_pos, bitmap_slot: bitmap_slot)
     let mask = 1 << bit_pos
     evm.sstore(slot: slot, value: evm.sload(slot) ^ mask)
-}
-
-#[arithmetic(unchecked)]
-pub fn next_initialized_tick_within_one_word(tick: i256, tick_spacing: i256, lte: bool) -> (
-    i256,
-    bool,
-)
-uses (bitmap: StorageMap<u256, u256>)
-{
-    let mut compressed = tick / tick_spacing
-    if tick < 0 && tick % tick_spacing != 0 {
-        compressed = compressed - 1
-    }
-
-    if lte {
-        let (word_pos, bit_pos) = position(compressed)
-        let bit = 1 << bit_pos
-        let mask = (bit - 1) + bit
-        let masked = bitmap.get(key: int_key(word_pos)) & mask
-        let initialized = masked != 0
-
-        if initialized {
-            let msb = most_significant_bit(masked)
-            let msb_u = msb as u256
-            let delta: i256 = (bit_pos - msb_u).downcast_unchecked()
-            return ((compressed - delta) * tick_spacing, true)
-        }
-
-        let delta: i256 = bit_pos.downcast_unchecked()
-        return ((compressed - delta) * tick_spacing, false)
-    }
-
-    let (word_pos, bit_pos) = position(compressed + 1)
-    let mask = !((1 << bit_pos) - 1)
-    let masked = bitmap.get(key: int_key(word_pos)) & mask
-    let initialized = masked != 0
-
-    if initialized {
-        let lsb = least_significant_bit(masked)
-        let lsb_u = lsb as u256
-        let delta: i256 = (lsb_u - bit_pos).downcast_unchecked()
-        return ((compressed + 1 + delta) * tick_spacing, true)
-    }
-
-    let delta: i256 = (0xff - bit_pos).downcast_unchecked()
-    ((compressed + 1 + delta) * tick_spacing, false)
 }
 
 #[arithmetic(unchecked)]
@@ -128,13 +71,16 @@ uses (evm: mut Evm)
     ((compressed + 1 + delta) * tick_spacing, false)
 }
 
-struct TickBitmapStore { bitmap: StorageMap<u256, u256> }
+const TEST_BITMAP_SLOT: u256 = 0
 
-fn is_initialized(_ tick: i256) -> bool uses (bitmap: StorageMap<u256, u256>) {
-    let (next, initialized) = next_initialized_tick_within_one_word(
+fn is_initialized_at(_ tick: i256, bitmap_slot: u256) -> bool
+uses (evm: mut Evm)
+{
+    let (next, initialized) = next_initialized_tick_within_one_word_at(
         tick,
         tick_spacing: 1,
         lte: true,
+        bitmap_slot,
     )
 
     next == tick && initialized
@@ -157,46 +103,44 @@ msg TickBitmapTestMsg {
     IsInitialized { tick: i256 } -> bool,
 }
 
-pub contract TickBitmapTest uses (evm: Evm) {
-    mut store: TickBitmapStore,
-
+pub contract TickBitmapTest uses (evm: mut Evm) {
     recv TickBitmapTestMsg {
-        FlipTick { tick } uses (mut store) {
-            with (store.bitmap) {
-                flip_tick(tick, tick_spacing: 1)
-            }
+        FlipTick { tick } uses (mut evm) {
+            flip_tick_at(tick, tick_spacing: 1, bitmap_slot: TEST_BITMAP_SLOT)
         }
 
-        GetGasCostOfFlipTick { tick } -> u256 uses (evm, mut store) {
+        GetGasCostOfFlipTick { tick } -> u256 uses (mut evm) {
             let gas_before = evm.gas()
-            with (store.bitmap) {
-                flip_tick(tick, tick_spacing: 1)
-            }
+            flip_tick_at(tick, tick_spacing: 1, bitmap_slot: TEST_BITMAP_SLOT)
             gas_before - evm.gas()
         }
 
         NextInitializedTickWithinOneWord { tick, lte } -> (i256, bool)
-        uses (store)
+        uses (mut evm)
         {
-            with (store.bitmap) {
-                next_initialized_tick_within_one_word(tick, tick_spacing: 1, lte)
-            }
+            next_initialized_tick_within_one_word_at(
+                tick,
+                tick_spacing: 1,
+                lte,
+                bitmap_slot: TEST_BITMAP_SLOT,
+            )
         }
 
         GetGasCostOfNextInitializedTickWithinOneWord { tick, lte } -> u256
-        uses (evm, store)
+        uses (mut evm)
         {
             let gas_before = evm.gas()
-            with (store.bitmap) {
-                next_initialized_tick_within_one_word(tick, tick_spacing: 1, lte)
-            }
+            next_initialized_tick_within_one_word_at(
+                tick,
+                tick_spacing: 1,
+                lte,
+                bitmap_slot: TEST_BITMAP_SLOT,
+            )
             gas_before - evm.gas()
         }
 
-        IsInitialized { tick } -> bool uses (store) {
-            with (store.bitmap) {
-                is_initialized(tick)
-            }
+        IsInitialized { tick } -> bool uses (mut evm) {
+            is_initialized_at(tick, bitmap_slot: TEST_BITMAP_SLOT)
         }
     }
 }
@@ -211,31 +155,30 @@ msg TickBitmapEchidnaTestMsg {
     CheckNextInitializedTickWithinOneWordInvariants { tick: Int24, lte: bool },
 }
 
-pub contract TickBitmapEchidnaTest {
-    mut store: TickBitmapStore,
-
+pub contract TickBitmapEchidnaTest uses (evm: mut Evm) {
     recv TickBitmapEchidnaTestMsg {
-        FlipTick { tick } uses (mut store) {
+        FlipTick { tick } uses (mut evm) {
             let tick_i = tick.val as i256
-            let before = with (store.bitmap) {
-                is_initialized(tick_i)
-            }
-            with (store.bitmap) {
-                flip_tick(tick: tick_i, tick_spacing: 1)
-            }
-            let after = with (store.bitmap) {
-                is_initialized(tick_i)
-            }
+            let before = is_initialized_at(tick_i, bitmap_slot: TEST_BITMAP_SLOT)
+            flip_tick_at(
+                tick: tick_i,
+                tick_spacing: 1,
+                bitmap_slot: TEST_BITMAP_SLOT,
+            )
+            let after = is_initialized_at(tick_i, bitmap_slot: TEST_BITMAP_SLOT)
             assert(after == !before)
         }
 
         CheckNextInitializedTickWithinOneWordInvariants { tick, lte }
-        uses (store)
+        uses (mut evm)
         {
             let tick_i = tick.val as i256
-            let (next, initialized) = with (store.bitmap) {
-                next_initialized_tick_within_one_word(tick: tick_i, tick_spacing: 1, lte)
-            }
+            let (next, initialized) = next_initialized_tick_within_one_word_at(
+                tick: tick_i,
+                tick_spacing: 1,
+                lte,
+                bitmap_slot: TEST_BITMAP_SLOT,
+            )
 
             if lte {
                 assert(tick_i >= -8388352)
@@ -244,11 +187,11 @@ pub contract TickBitmapEchidnaTest {
 
                 let mut i = tick_i
                 while i > next {
-                    assert(!with (store.bitmap) { is_initialized(i) })
+                    assert(!is_initialized_at(i, bitmap_slot: TEST_BITMAP_SLOT))
                     i = i - 1
                 }
                 assert(
-                    with (store.bitmap) { is_initialized(next) } == initialized,
+                    is_initialized_at(next, bitmap_slot: TEST_BITMAP_SLOT) == initialized,
                 )
             } else {
                 assert(tick_i < 8388351)
@@ -257,11 +200,11 @@ pub contract TickBitmapEchidnaTest {
 
                 let mut i = tick_i + 1
                 while i < next {
-                    assert(!with (store.bitmap) { is_initialized(i) })
+                    assert(!is_initialized_at(i, bitmap_slot: TEST_BITMAP_SLOT))
                     i = i + 1
                 }
                 assert(
-                    with (store.bitmap) { is_initialized(next) } == initialized,
+                    is_initialized_at(next, bitmap_slot: TEST_BITMAP_SLOT) == initialized,
                 )
             }
         }
