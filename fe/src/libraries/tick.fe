@@ -314,10 +314,12 @@ pub fn get_fee_growth_inside_at(
 ) -> (u256, u256)
 uses (evm: mut Evm)
 {
-    let lower_fee_growth_outside0_x128 = slot1_at(tick_lower, ticks_slot: ticks_slot)
-    let lower_fee_growth_outside1_x128 = slot2_at(tick_lower, ticks_slot: ticks_slot)
-    let upper_fee_growth_outside0_x128 = slot1_at(tick_upper, ticks_slot: ticks_slot)
-    let upper_fee_growth_outside1_x128 = slot2_at(tick_upper, ticks_slot: ticks_slot)
+    let lower_base = mapping_slot_at(tick_lower, ticks_slot: ticks_slot)
+    let upper_base = mapping_slot_at(tick_upper, ticks_slot: ticks_slot)
+    let lower_fee_growth_outside0_x128 = evm.sload(lower_base + 1)
+    let lower_fee_growth_outside1_x128 = evm.sload(lower_base + 2)
+    let upper_fee_growth_outside0_x128 = evm.sload(upper_base + 1)
+    let upper_fee_growth_outside1_x128 = evm.sload(upper_base + 2)
 
     let (fee_growth_below0_x128, fee_growth_below1_x128) = if tick_current >= tick_lower {
         (lower_fee_growth_outside0_x128, lower_fee_growth_outside1_x128)

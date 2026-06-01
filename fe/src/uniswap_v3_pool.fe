@@ -437,16 +437,20 @@ uses (evm: mut Evm, store: mut PoolStore)
 
     let slot0 = store.slot0
     let tick_current_i = slot0.tick() as i256
-    let pool_config = store.pool_config
-    let tick_spacing = config_tick_spacing(pool_config) as i256
-    let max_liquidity = config_max_liquidity(pool_config)
+    let fee_growth_global0_x128 = store.fee_growth_global0_x128
+    let fee_growth_global1_x128 = store.fee_growth_global1_x128
 
     let mut current_time: u32 = 0
     let mut tick_cumulative: i256 = 0
     let mut seconds_per_liquidity_cumulative_x128: u256 = 0
+    let mut liquidity_before: u128 = 0
     let mut flipped_lower = false
     let mut flipped_upper = false
     if liquidity_delta != 0 {
+        let pool_config = store.pool_config
+        let tick_spacing = config_tick_spacing(pool_config) as i256
+        let max_liquidity = config_max_liquidity(pool_config)
+        liquidity_before = store.liquidity
         current_time = evm.timestamp().downcast_unchecked()
         let time_delta = current_time - store.observation0_block_timestamp
         tick_cumulative = current_tick_cumulative(
@@ -458,14 +462,14 @@ uses (evm: mut Evm, store: mut PoolStore)
             seconds_per_liquidity_cumulative_x128: store
                 .observation0_seconds_per_liquidity_cumulative_x128,
             time_delta,
-            liquidity: store.liquidity,
+            liquidity: liquidity_before,
         )
         flipped_lower = tick::update_at(
             tick: tick_lower,
             tick_current: tick_current_i,
             liquidity_delta,
-            fee_growth_global0_x128: store.fee_growth_global0_x128,
-            fee_growth_global1_x128: store.fee_growth_global1_x128,
+            fee_growth_global0_x128,
+            fee_growth_global1_x128,
             seconds_per_liquidity_cumulative_x128,
             tick_cumulative,
             time: current_time,
@@ -477,8 +481,8 @@ uses (evm: mut Evm, store: mut PoolStore)
             tick: tick_upper,
             tick_current: tick_current_i,
             liquidity_delta,
-            fee_growth_global0_x128: store.fee_growth_global0_x128,
-            fee_growth_global1_x128: store.fee_growth_global1_x128,
+            fee_growth_global0_x128,
+            fee_growth_global1_x128,
             seconds_per_liquidity_cumulative_x128,
             tick_cumulative,
             time: current_time,
@@ -507,8 +511,8 @@ uses (evm: mut Evm, store: mut PoolStore)
         tick_lower,
         tick_upper,
         tick_current: tick_current_i,
-        fee_growth_global0_x128: store.fee_growth_global0_x128,
-        fee_growth_global1_x128: store.fee_growth_global1_x128,
+        fee_growth_global0_x128,
+        fee_growth_global1_x128,
         ticks_slot: TICKS_SLOT,
     )
     let position_slot = position::position_slot(
@@ -599,7 +603,7 @@ uses (evm: mut Evm, store: mut PoolStore)
         store.observation0_tick_cumulative = tick_cumulative.downcast_unchecked()
         store
             .observation0_seconds_per_liquidity_cumulative_x128 = seconds_per_liquidity_cumulative_x128
-        store.liquidity = add_delta(store.liquidity, liquidity_delta)
+        store.liquidity = add_delta(liquidity_before, liquidity_delta)
     }
 
     (amount0, amount1)
