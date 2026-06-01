@@ -961,15 +961,7 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
                 len: 1,
             )
             let tick = tick_at_sqrt_ratio(sqrt_price_x96)
-            store.slot0 = PackedSlot0::new(
-                sqrt_price_x96,
-                tick,
-                observation_index: 0,
-                observation_cardinality: 1,
-                observation_cardinality_next: 1,
-                fee_protocol: 0,
-                unlocked: true,
-            )
+            store.slot0 = PackedSlot0::initialized(sqrt_price_x96, tick)
             store.observation0_block_timestamp = evm.timestamp().downcast_unchecked()
             store.observation0_tick_cumulative = 0
             store.observation0_seconds_per_liquidity_cumulative_x128 = 0
