@@ -1315,6 +1315,7 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
         Flash uses (ctx, mut call, mut evm, mut store) {
             let slot0 = store.slot0
             check_unlocked(mut evm, slot0.unlocked())
+            store.slot0 = slot0.lock()
             let fee_protocol = slot0.fee_protocol()
             require_msg(
                 mut evm,
@@ -1378,6 +1379,7 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
                 paid0,
                 paid1,
             )
+            store.slot0 = slot0
         }
 
         Swap uses (ctx, mut call, mut evm, mut store) {

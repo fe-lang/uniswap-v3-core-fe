@@ -1790,6 +1790,14 @@ describe('UniswapV3Pool', () => {
       // the tests happen in solidity
       await expect(reentrant.swapToReenter(pool.address)).to.be.revertedWith('Unable to reenter')
     })
+
+    it('cannot reenter from flash callback', async () => {
+      const reentrant = (await (
+        await getContractFactory('TestUniswapV3ReentrantCallee')
+      ).deploy()) as TestUniswapV3ReentrantCallee
+
+      await expect(reentrant.flashToReenter(pool.address)).to.be.revertedWith('Unable to reenter')
+    })
   })
 
   describe('#snapshotCumulativesInside', () => {

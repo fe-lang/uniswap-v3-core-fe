@@ -14,14 +14,23 @@ msg PoolMsg {
         sqrtPriceLimitX96: Uint160,
         data: Bytes,
     } -> (i256, i256),
+
+    #[selector = sol("flash(address,uint256,uint256,bytes)")]
+    Flash { recipient: Address, amount0: u256, amount1: u256, data: Bytes },
 }
 
 msg TestUniswapV3ReentrantCalleeMsg {
     #[selector = sol("swapToReenter(address)")]
     SwapToReenter { pool: Address },
 
+    #[selector = sol("flashToReenter(address)")]
+    FlashToReenter { pool: Address },
+
     #[selector = sol("uniswapV3SwapCallback(int256,int256,bytes)")]
     UniswapV3SwapCallback { amount0Delta: i256, amount1Delta: i256, data: Bytes },
+
+    #[selector = sol("uniswapV3FlashCallback(uint256,uint256,bytes)")]
+    UniswapV3FlashCallback { fee0: u256, fee1: u256, data: Bytes },
 }
 
 fn expect_lok(_ success: bool) uses (evm: mut Evm) {
@@ -62,67 +71,91 @@ pub contract TestUniswapV3ReentrantCallee uses (ctx: Ctx, evm: mut Evm) {
                 )
         }
 
+        FlashToReenter { pool } uses (mut evm) {
+            evm.call(
+                addr: pool,
+                gas: 1000000,
+                value: 0,
+                message: PoolMsg::Flash {
+                    recipient: Address { inner: 0 },
+                    amount0: 0,
+                    amount1: 0,
+                    data: Bytes { data: 0, len: 0, size: 32 },
+                },
+            )
+        }
+
         UniswapV3SwapCallback { amount0Delta: _, amount1Delta: _, data: _ }
         uses (ctx, mut evm)
         {
             let pool = ctx.caller()
+            check_locked_entrypoints(pool)
+        }
 
-            let swap_ptr = std::evm::mem::alloc(196)
-            evm.mstore(addr: swap_ptr, value: (0x128acb08 as u256) << 224)
-            evm.mstore(addr: swap_ptr + 4, value: 0)
-            evm.mstore(addr: swap_ptr + 36, value: 0)
-            evm.mstore(addr: swap_ptr + 68, value: 1)
-            evm.mstore(addr: swap_ptr + 100, value: 0)
-            evm.mstore(addr: swap_ptr + 132, value: 160)
-            evm.mstore(addr: swap_ptr + 164, value: 0)
-            raw_call_expect_lok(pool, args_offset: swap_ptr, args_len: 196)
-
-            let mint_ptr = std::evm::mem::alloc(196)
-            evm.mstore(addr: mint_ptr, value: (0x3c8a7d8d as u256) << 224)
-            evm.mstore(addr: mint_ptr + 4, value: 0)
-            evm.mstore(addr: mint_ptr + 36, value: 0)
-            evm.mstore(addr: mint_ptr + 68, value: 0)
-            evm.mstore(addr: mint_ptr + 100, value: 0)
-            evm.mstore(addr: mint_ptr + 132, value: 160)
-            evm.mstore(addr: mint_ptr + 164, value: 0)
-            raw_call_expect_lok(pool, args_offset: mint_ptr, args_len: 196)
-
-            let collect_ptr = std::evm::mem::alloc(164)
-            evm.mstore(addr: collect_ptr, value: (0x4f1eb3d8 as u256) << 224)
-            evm.mstore(addr: collect_ptr + 4, value: 0)
-            evm.mstore(addr: collect_ptr + 36, value: 0)
-            evm.mstore(addr: collect_ptr + 68, value: 0)
-            evm.mstore(addr: collect_ptr + 100, value: 0)
-            evm.mstore(addr: collect_ptr + 132, value: 0)
-            raw_call_expect_lok(pool, args_offset: collect_ptr, args_len: 164)
-
-            let burn_ptr = std::evm::mem::alloc(100)
-            evm.mstore(addr: burn_ptr, value: (0xa34123a7 as u256) << 224)
-            evm.mstore(addr: burn_ptr + 4, value: 0)
-            evm.mstore(addr: burn_ptr + 36, value: 0)
-            evm.mstore(addr: burn_ptr + 68, value: 0)
-            raw_call_expect_lok(pool, args_offset: burn_ptr, args_len: 100)
-
-            let flash_ptr = std::evm::mem::alloc(164)
-            evm.mstore(addr: flash_ptr, value: (0x490e6cbc as u256) << 224)
-            evm.mstore(addr: flash_ptr + 4, value: 0)
-            evm.mstore(addr: flash_ptr + 36, value: 0)
-            evm.mstore(addr: flash_ptr + 68, value: 0)
-            evm.mstore(addr: flash_ptr + 100, value: 128)
-            evm.mstore(addr: flash_ptr + 132, value: 0)
-            raw_call_expect_lok(pool, args_offset: flash_ptr, args_len: 164)
-
-            let collect_protocol_ptr = std::evm::mem::alloc(100)
-            evm.mstore(
-                addr: collect_protocol_ptr,
-                value: (0x85b66729 as u256) << 224,
-            )
-            evm.mstore(addr: collect_protocol_ptr + 4, value: 0)
-            evm.mstore(addr: collect_protocol_ptr + 36, value: 0)
-            evm.mstore(addr: collect_protocol_ptr + 68, value: 0)
-            raw_call_expect_lok(pool, args_offset: collect_protocol_ptr, args_len: 100)
-
-            assert!(false, "Unable to reenter")
+        UniswapV3FlashCallback { fee0: _, fee1: _, data: _ }
+        uses (ctx, mut evm)
+        {
+            let pool = ctx.caller()
+            check_locked_entrypoints(pool)
         }
     }
+}
+
+fn check_locked_entrypoints(pool: Address) uses (evm: mut Evm) {
+    let swap_ptr = std::evm::mem::alloc(196)
+    evm.mstore(addr: swap_ptr, value: (0x128acb08 as u256) << 224)
+    evm.mstore(addr: swap_ptr + 4, value: 0)
+    evm.mstore(addr: swap_ptr + 36, value: 0)
+    evm.mstore(addr: swap_ptr + 68, value: 1)
+    evm.mstore(addr: swap_ptr + 100, value: 0)
+    evm.mstore(addr: swap_ptr + 132, value: 160)
+    evm.mstore(addr: swap_ptr + 164, value: 0)
+    raw_call_expect_lok(pool, args_offset: swap_ptr, args_len: 196)
+
+    let mint_ptr = std::evm::mem::alloc(196)
+    evm.mstore(addr: mint_ptr, value: (0x3c8a7d8d as u256) << 224)
+    evm.mstore(addr: mint_ptr + 4, value: 0)
+    evm.mstore(addr: mint_ptr + 36, value: 0)
+    evm.mstore(addr: mint_ptr + 68, value: 0)
+    evm.mstore(addr: mint_ptr + 100, value: 0)
+    evm.mstore(addr: mint_ptr + 132, value: 160)
+    evm.mstore(addr: mint_ptr + 164, value: 0)
+    raw_call_expect_lok(pool, args_offset: mint_ptr, args_len: 196)
+
+    let collect_ptr = std::evm::mem::alloc(164)
+    evm.mstore(addr: collect_ptr, value: (0x4f1eb3d8 as u256) << 224)
+    evm.mstore(addr: collect_ptr + 4, value: 0)
+    evm.mstore(addr: collect_ptr + 36, value: 0)
+    evm.mstore(addr: collect_ptr + 68, value: 0)
+    evm.mstore(addr: collect_ptr + 100, value: 0)
+    evm.mstore(addr: collect_ptr + 132, value: 0)
+    raw_call_expect_lok(pool, args_offset: collect_ptr, args_len: 164)
+
+    let burn_ptr = std::evm::mem::alloc(100)
+    evm.mstore(addr: burn_ptr, value: (0xa34123a7 as u256) << 224)
+    evm.mstore(addr: burn_ptr + 4, value: 0)
+    evm.mstore(addr: burn_ptr + 36, value: 0)
+    evm.mstore(addr: burn_ptr + 68, value: 0)
+    raw_call_expect_lok(pool, args_offset: burn_ptr, args_len: 100)
+
+    let flash_ptr = std::evm::mem::alloc(164)
+    evm.mstore(addr: flash_ptr, value: (0x490e6cbc as u256) << 224)
+    evm.mstore(addr: flash_ptr + 4, value: 0)
+    evm.mstore(addr: flash_ptr + 36, value: 0)
+    evm.mstore(addr: flash_ptr + 68, value: 0)
+    evm.mstore(addr: flash_ptr + 100, value: 128)
+    evm.mstore(addr: flash_ptr + 132, value: 0)
+    raw_call_expect_lok(pool, args_offset: flash_ptr, args_len: 164)
+
+    let collect_protocol_ptr = std::evm::mem::alloc(100)
+    evm.mstore(
+        addr: collect_protocol_ptr,
+        value: (0x85b66729 as u256) << 224,
+    )
+    evm.mstore(addr: collect_protocol_ptr + 4, value: 0)
+    evm.mstore(addr: collect_protocol_ptr + 36, value: 0)
+    evm.mstore(addr: collect_protocol_ptr + 68, value: 0)
+    raw_call_expect_lok(pool, args_offset: collect_protocol_ptr, args_len: 100)
+
+    assert!(false, "Unable to reenter")
 }

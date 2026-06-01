@@ -3,15 +3,20 @@ pragma solidity =0.7.6;
 
 import '../libraries/TickMath.sol';
 
+import '../interfaces/callback/IUniswapV3FlashCallback.sol';
 import '../interfaces/callback/IUniswapV3SwapCallback.sol';
 
 import '../interfaces/IUniswapV3Pool.sol';
 
-contract TestUniswapV3ReentrantCallee is IUniswapV3SwapCallback {
+contract TestUniswapV3ReentrantCallee is IUniswapV3SwapCallback, IUniswapV3FlashCallback {
     string private constant expectedReason = 'LOK';
 
     function swapToReenter(address pool) external {
         IUniswapV3Pool(pool).swap(address(0), false, 1, TickMath.MAX_SQRT_RATIO - 1, new bytes(0));
+    }
+
+    function flashToReenter(address pool) external {
+        IUniswapV3Pool(pool).flash(address(0), 0, 0, new bytes(0));
     }
 
     function uniswapV3SwapCallback(
@@ -19,6 +24,18 @@ contract TestUniswapV3ReentrantCallee is IUniswapV3SwapCallback {
         int256,
         bytes calldata
     ) external override {
+        _checkLockedEntrypoints();
+    }
+
+    function uniswapV3FlashCallback(
+        uint256,
+        uint256,
+        bytes calldata
+    ) external override {
+        _checkLockedEntrypoints();
+    }
+
+    function _checkLockedEntrypoints() private {
         // try to reenter swap
         try IUniswapV3Pool(msg.sender).swap(address(0), false, 1, 0, new bytes(0)) {} catch Error(
             string memory reason
