@@ -1,0 +1,33 @@
+use std::evm::ops::signextend
+
+const MASK_U32: u256 = 0xffffffff
+const MASK_U128: u256 = 0xffffffffffffffffffffffffffffffff
+const TICK_SPACING_OFFSET: u256 = 32
+const MAX_LIQUIDITY_OFFSET: u256 = 64
+
+#[arithmetic(unchecked)]
+fn signed_word(_ value: i256) -> u256 {
+    value.downcast_unchecked()
+}
+
+#[arithmetic(unchecked)]
+pub fn pack_config(_ fee: u32, _ tick_spacing: i32, _ max_liquidity: u128) -> u256 {
+    (fee as u256)
+        | ((signed_word(tick_spacing as i256) & MASK_U32) << TICK_SPACING_OFFSET)
+        | ((max_liquidity as u256) << MAX_LIQUIDITY_OFFSET)
+}
+
+#[arithmetic(unchecked)]
+pub fn config_fee(_ config: u256) -> u32 {
+    (config & MASK_U32).downcast_unchecked()
+}
+
+#[arithmetic(unchecked)]
+pub fn config_tick_spacing(_ config: u256) -> i32 {
+    signextend(byte: 3, value: config >> TICK_SPACING_OFFSET).downcast_unchecked()
+}
+
+#[arithmetic(unchecked)]
+pub fn config_max_liquidity(_ config: u256) -> u128 {
+    ((config >> MAX_LIQUIDITY_OFFSET) & MASK_U128).downcast_unchecked()
+}
