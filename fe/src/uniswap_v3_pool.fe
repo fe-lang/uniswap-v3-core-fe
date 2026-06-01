@@ -953,7 +953,7 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
 
         Initialize uses (mut store, mut evm) {
             let sqrt_price_x96 = evm.calldataload(4)
-            assert(store.slot0.sqrt_price_x96() == 0)
+            assert(!store.slot0.is_initialized())
             require_msg(
                 mut evm,
                 condition: sqrt_price_x96 >= min_sqrt_ratio() && sqrt_price_x96 < max_sqrt_ratio(),
@@ -974,7 +974,7 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
             let observation_cardinality_next: u16 = word.downcast_unchecked()
             let slot0 = store.slot0
             check_unlocked(mut evm, slot0.unlocked())
-            store.slot0 = slot0.with_unlocked(false)
+            store.slot0 = slot0.lock()
             let old = slot0.observation_cardinality_next()
             let new = if observation_cardinality_next > old {
                 observation_cardinality_next
@@ -985,7 +985,7 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
             if old != new {
                 emit_increase_observation_cardinality_next(old, new)
             }
-            store.slot0 = store.slot0.with_unlocked(true)
+            store.slot0 = store.slot0.unlock()
         }
         FeeGrowthGlobal0X128 uses (store, mut evm) {
             return_word(value: store.fee_growth_global0_x128)
@@ -1104,7 +1104,7 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
         SetFeeProtocol uses (ctx, mut call, mut evm, mut store) {
             let slot0 = store.slot0
             check_unlocked(mut evm, slot0.unlocked())
-            store.slot0 = slot0.with_unlocked(false)
+            store.slot0 = slot0.lock()
             assert(evm.calldatasize() >= 68)
             let fee0_word = evm.calldataload(4)
             let fee1_word = evm.calldataload(36)
@@ -1128,13 +1128,13 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
             evm.mstore(addr: 64, value: feeProtocol0 as u256)
             evm.mstore(addr: 96, value: feeProtocol1 as u256)
             evm.log1(offset: 0, len: 128, topic0: SET_FEE_PROTOCOL_TOPIC)
-            store.slot0 = store.slot0.with_unlocked(true)
+            store.slot0 = store.slot0.unlock()
         }
 
         CollectProtocol uses (ctx, mut call, mut evm, mut store) {
             let slot0 = store.slot0
             check_unlocked(mut evm, slot0.unlocked())
-            store.slot0 = slot0.with_unlocked(false)
+            store.slot0 = slot0.lock()
             assert(
                 ctx.caller().inner == factory_owner(factory: store.factory),
             )
@@ -1169,13 +1169,14 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
                 topic1: ctx.caller().inner,
                 topic2: recipient.inner,
             )
-            store.slot0 = store.slot0.with_unlocked(true)
+            store.slot0 = store.slot0.unlock()
             return_pair(amount0: amount0 as u256, amount1: amount1 as u256)
         }
 
         Flash uses (ctx, mut call, mut evm, mut store) {
             let slot0 = store.slot0
             check_unlocked(mut evm, slot0.unlocked())
+            let fee_protocol = slot0.fee_protocol()
             require_msg(
                 mut evm,
                 condition: store.liquidity != 0,
@@ -1205,7 +1206,7 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
             let paid0 = sub_u256(a: balance0_after, b: balance0_before)
             let paid1 = sub_u256(a: balance1_after, b: balance1_before)
             if paid0 > 0 {
-                let feeProtocol0 = slot0.fee_protocol() & 0x0f
+                let feeProtocol0 = fee_protocol & 0x0f
                 let fees0 = if feeProtocol0 == 0 {
                     0
                 } else {
@@ -1218,7 +1219,7 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
                 )
             }
             if paid1 > 0 {
-                let feeProtocol1 = slot0.fee_protocol() >> 4
+                let feeProtocol1 = fee_protocol >> 4
                 let fees1 = if feeProtocol1 == 0 {
                     0
                 } else {
@@ -1267,7 +1268,7 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
                 code: MSG_SPL,
                 len: 3,
             )
-            store.slot0 = slot0_start.with_unlocked(false)
+            store.slot0 = slot0_start.lock()
             let input_token = if zero_for_one {
                 store.token0
             } else {
@@ -1296,10 +1297,11 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
             let liquidity_start = store.liquidity
             let mut liquidity_current = liquidity_start
             let mut protocol_fees = 0
+            let fee_protocol_word = slot0_start.fee_protocol()
             let fee_protocol = if zero_for_one {
-                slot0_start.fee_protocol() & 0x0f
+                fee_protocol_word & 0x0f
             } else {
-                slot0_start.fee_protocol() >> 4
+                fee_protocol_word >> 4
             }
             let mut fee_growth_global_x128 = if zero_for_one {
                 store.fee_growth_global0_x128
@@ -1505,7 +1507,7 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
                 topic1: ctx.caller().inner,
                 topic2: recipient.inner,
             )
-            store.slot0 = store.slot0.with_unlocked(true)
+            store.slot0 = store.slot0.unlock()
             if zero_for_one {
                 return_pair(
                     amount0: amount_owed,
@@ -1769,7 +1771,7 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
         Mint uses (ctx, mut call, mut evm, mut store) {
             let slot0 = store.slot0
             check_unlocked(mut evm, slot0.unlocked())
-            store.slot0 = slot0.with_unlocked(false)
+            store.slot0 = slot0.lock()
 
             let recipient = Address { inner: evm.calldataload(4) }
             let tick_lower = decode_int24_word(evm.calldataload(36)).downcast_unchecked()
@@ -1818,7 +1820,7 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
                 )
             }
 
-            store.slot0 = store.slot0.with_unlocked(true)
+            store.slot0 = store.slot0.unlock()
             emit_mint(
                 sender: ctx.caller(),
                 owner: recipient,
@@ -1834,7 +1836,7 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
         Burn uses (ctx, mut call, mut evm, mut store) {
             let slot0 = store.slot0
             check_unlocked(mut evm, slot0.unlocked())
-            store.slot0 = slot0.with_unlocked(false)
+            store.slot0 = slot0.lock()
 
             let tick_lower = decode_int24_word(evm.calldataload(4)).downcast_unchecked()
             let tick_upper = decode_int24_word(evm.calldataload(36)).downcast_unchecked()
@@ -1848,7 +1850,7 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
                 liquidity_delta,
             )
 
-            store.slot0 = store.slot0.with_unlocked(true)
+            store.slot0 = store.slot0.unlock()
             emit_burn(
                 owner: ctx.caller(),
                 tick_lower,
@@ -1863,7 +1865,7 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
         Collect uses (ctx, mut evm, mut store) {
             let slot0 = store.slot0
             check_unlocked(mut evm, slot0.unlocked())
-            store.slot0 = slot0.with_unlocked(false)
+            store.slot0 = slot0.lock()
 
             let recipient = Address { inner: evm.calldataload(4) }
             let tick_lower = decode_int24_word(evm.calldataload(36))
@@ -1902,7 +1904,7 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
             if amount1 > 0 {
                 transfer_scratch(token: store.token1, to: recipient, value: amount1 as u256)
             }
-            store.slot0 = store.slot0.with_unlocked(true)
+            store.slot0 = store.slot0.unlock()
             evm.mstore(addr: 0, value: recipient.inner)
             evm.mstore(addr: 32, value: amount0 as u256)
             evm.mstore(addr: 64, value: amount1 as u256)

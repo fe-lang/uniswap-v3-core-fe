@@ -10,6 +10,7 @@ const OBSERVATION_CARDINALITY_OFFSET: u256 = 200
 const OBSERVATION_CARDINALITY_NEXT_OFFSET: u256 = 216
 const FEE_PROTOCOL_OFFSET: u256 = 232
 const UNLOCKED_OFFSET: u256 = 240
+const UNLOCKED_BIT: u256 = 1 << UNLOCKED_OFFSET
 
 pub struct PackedSlot0 { word: u256 }
 
@@ -37,8 +38,13 @@ impl PackedSlot0 {
     }
 
     #[arithmetic(unchecked)]
+    pub fn is_initialized(self) -> bool {
+        self.word != 0
+    }
+
+    #[arithmetic(unchecked)]
     pub fn tick(self) -> i32 {
-        signextend(byte: 2, value: (self.word >> TICK_OFFSET) & MASK_U24).downcast_unchecked()
+        signextend(byte: 2, value: self.word >> TICK_OFFSET).downcast_unchecked()
     }
 
     #[arithmetic(unchecked)]
@@ -63,7 +69,7 @@ impl PackedSlot0 {
 
     #[arithmetic(unchecked)]
     pub fn unlocked(self) -> bool {
-        ((self.word >> UNLOCKED_OFFSET) & 1) != 0
+        (self.word & UNLOCKED_BIT) != 0
     }
 
     #[arithmetic(unchecked)]
@@ -95,10 +101,12 @@ impl PackedSlot0 {
     }
 
     #[arithmetic(unchecked)]
-    pub fn with_unlocked(self, _ unlocked: bool) -> Self {
-        let unlocked_word = if unlocked { 1 } else { 0 }
-        PackedSlot0 {
-            word: (self.word & !(MASK_U8 << UNLOCKED_OFFSET)) | (unlocked_word << UNLOCKED_OFFSET),
-        }
+    pub fn lock(self) -> Self {
+        PackedSlot0 { word: self.word & !(MASK_U8 << UNLOCKED_OFFSET) }
+    }
+
+    #[arithmetic(unchecked)]
+    pub fn unlock(self) -> Self {
+        PackedSlot0 { word: self.word | UNLOCKED_BIT }
     }
 }
