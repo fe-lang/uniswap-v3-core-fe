@@ -1,0 +1,122 @@
+use std::evm::ops::signextend
+use super::tick_bitmap::int_key
+
+const MASK_U8: u256 = 0xff
+const MASK_U16: u256 = 0xffff
+const MASK_U24: u256 = 0xffffff
+const MASK_U160: u256 = 0xffffffffffffffffffffffffffffffffffffffff
+const TICK_OFFSET: u256 = 160
+const OBSERVATION_INDEX_OFFSET: u256 = 184
+const OBSERVATION_CARDINALITY_OFFSET: u256 = 200
+const OBSERVATION_CARDINALITY_NEXT_OFFSET: u256 = 216
+const FEE_PROTOCOL_OFFSET: u256 = 232
+const UNLOCKED_OFFSET: u256 = 240
+const MIN_I24: i256 = -0x800000
+const MAX_I24: i256 = 0x7fffff
+
+pub struct PackedSlot0 { word: u256 }
+
+impl Copy for PackedSlot0 {}
+
+#[arithmetic(unchecked)]
+fn tick_word(_ tick: i32) -> u256 {
+    let tick_i = tick as i256
+    assert(tick_i >= MIN_I24 && tick_i <= MAX_I24)
+    int_key(tick_i) & MASK_U24
+}
+
+impl PackedSlot0 {
+    #[arithmetic(unchecked)]
+    pub fn new(
+        sqrt_price_x96: u256,
+        tick: i32,
+        observation_index: u16,
+        observation_cardinality: u16,
+        observation_cardinality_next: u16,
+        fee_protocol: u8,
+        unlocked: bool,
+    ) -> Self {
+        assert(sqrt_price_x96 <= MASK_U160)
+        let unlocked_word = if unlocked { 1 } else { 0 }
+        PackedSlot0 {
+            word: sqrt_price_x96
+                | (tick_word(tick) << TICK_OFFSET)
+                | ((observation_index as u256) << OBSERVATION_INDEX_OFFSET)
+                | ((observation_cardinality as u256) << OBSERVATION_CARDINALITY_OFFSET)
+                | ((observation_cardinality_next as u256) << OBSERVATION_CARDINALITY_NEXT_OFFSET)
+                | ((fee_protocol as u256) << FEE_PROTOCOL_OFFSET)
+                | (unlocked_word << UNLOCKED_OFFSET),
+        }
+    }
+    #[arithmetic(unchecked)]
+    pub fn sqrt_price_x96(self) -> u256 {
+        self.word & MASK_U160
+    }
+
+    #[arithmetic(unchecked)]
+    pub fn tick(self) -> i32 {
+        signextend(byte: 2, value: (self.word >> TICK_OFFSET) & MASK_U24).downcast_unchecked()
+    }
+
+    #[arithmetic(unchecked)]
+    pub fn observation_index(self) -> u16 {
+        ((self.word >> OBSERVATION_INDEX_OFFSET) & MASK_U16).downcast_unchecked()
+    }
+
+    #[arithmetic(unchecked)]
+    pub fn observation_cardinality(self) -> u16 {
+        ((self.word >> OBSERVATION_CARDINALITY_OFFSET) & MASK_U16).downcast_unchecked()
+    }
+
+    #[arithmetic(unchecked)]
+    pub fn observation_cardinality_next(self) -> u16 {
+        ((self.word >> OBSERVATION_CARDINALITY_NEXT_OFFSET) & MASK_U16).downcast_unchecked()
+    }
+
+    #[arithmetic(unchecked)]
+    pub fn fee_protocol(self) -> u8 {
+        ((self.word >> FEE_PROTOCOL_OFFSET) & MASK_U8).downcast_unchecked()
+    }
+
+    #[arithmetic(unchecked)]
+    pub fn unlocked(self) -> bool {
+        ((self.word >> UNLOCKED_OFFSET) & 1) != 0
+    }
+
+    #[arithmetic(unchecked)]
+    pub fn with_sqrt_price_x96(self, _ sqrt_price_x96: u256) -> Self {
+        assert(sqrt_price_x96 <= MASK_U160)
+        PackedSlot0 { word: (self.word & !MASK_U160) | sqrt_price_x96 }
+    }
+
+    #[arithmetic(unchecked)]
+    pub fn with_tick(self, _ tick: i32) -> Self {
+        PackedSlot0 {
+            word: (self.word & !(MASK_U24 << TICK_OFFSET)) | (tick_word(tick) << TICK_OFFSET),
+        }
+    }
+
+    #[arithmetic(unchecked)]
+    pub fn with_observation_cardinality_next(self, _ observation_cardinality_next: u16) -> Self {
+        PackedSlot0 {
+            word: (self.word & !(MASK_U16 << OBSERVATION_CARDINALITY_NEXT_OFFSET))
+                | ((observation_cardinality_next as u256) << OBSERVATION_CARDINALITY_NEXT_OFFSET),
+        }
+    }
+
+    #[arithmetic(unchecked)]
+    pub fn with_fee_protocol(self, _ fee_protocol: u8) -> Self {
+        PackedSlot0 {
+            word: (self.word & !(MASK_U8 << FEE_PROTOCOL_OFFSET))
+                | ((fee_protocol as u256) << FEE_PROTOCOL_OFFSET),
+        }
+    }
+
+    #[arithmetic(unchecked)]
+    pub fn with_unlocked(self, _ unlocked: bool) -> Self {
+        let unlocked_word = if unlocked { 1 } else { 0 }
+        PackedSlot0 {
+            word: (self.word & !(MASK_U8 << UNLOCKED_OFFSET)) | (unlocked_word << UNLOCKED_OFFSET),
+        }
+    }
+}
