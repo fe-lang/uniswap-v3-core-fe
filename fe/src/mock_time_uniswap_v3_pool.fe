@@ -430,6 +430,7 @@ uses (evm: mut Evm)
 }
 
 #[arithmetic(unchecked)]
+#[inline(never)]
 fn call_modify_position(
     pool: Address,
     owner: Address,
@@ -464,7 +465,7 @@ fn call_swap_step(
     sqrt_ratio_target_x96: u256,
     liquidity: u128,
     amount_remaining: u256,
-    fee_pips: u32,
+    fee_pips: u256,
 ) -> (u256, u256, u256, u256) {
     let zero_for_one = sqrt_ratio_current_x96 >= sqrt_ratio_target_x96
     let exact_input = amount_remaining <= MAX_I256_WORD
@@ -479,7 +480,7 @@ fn call_swap_step(
     if exact_input {
         let amount_remaining_less_fee = mul_div(
             amount_remaining_abs,
-            1000000 - (fee_pips as u256),
+            1000000 - fee_pips,
             denominator: 1000000,
         )
         amount_in = if zero_for_one {
@@ -585,11 +586,7 @@ fn call_swap_step(
     let fee_amount = if exact_input && sqrt_ratio_next_x96 != sqrt_ratio_target_x96 {
         sub_u256(a: amount_remaining_abs, b: amount_in)
     } else {
-        mul_div_rounding_up(
-            amount_in,
-            fee_pips as u256,
-            denominator: 1000000 - (fee_pips as u256),
-        )
+        mul_div_rounding_up(amount_in, fee_pips, denominator: 1000000 - fee_pips)
     }
     (sqrt_ratio_next_x96, amount_in, amount_out, fee_amount)
 }
@@ -1291,7 +1288,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             let sqrt_price_start_x96 = store.sqrt_price_x96
             let tick_start = store.tick
             let current_time: u32 = store.time.downcast_unchecked()
-            let fee_pips = store.fee
+            let fee_pips = store.fee as u256
             let tick_spacing = store.tick_spacing as i256
             let mut tick_cumulative: i256 = 0
             let mut seconds_per_liquidity_cumulative_x128: u256 = 0
