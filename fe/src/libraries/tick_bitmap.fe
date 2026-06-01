@@ -2,13 +2,7 @@ use std::abi::sol::{self, Int24}
 use std::evm::{Evm, RawMem, RawStorage, StorageMap}
 use super::bit_math::{least_significant_bit, most_significant_bit}
 
-const U256_MAX: u256 = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
-
 pub fn int_key(_ value: i256) -> u256 {
-    if value < 0 {
-        return U256_MAX - (0 - value).downcast_unchecked() + 1
-    }
-
     value.downcast_unchecked()
 }
 
