@@ -102,13 +102,19 @@ fn store_liquidity(base_slot: u256, value: u128) uses (evm: mut Evm) {
 }
 
 #[arithmetic(unchecked)]
-fn store_tokens_owed(base_slot: u256, token0: u128, token1: u128)
+pub fn set_tokens_owed(base_slot: u256, token0: u128, token1: u128)
 uses (evm: mut Evm)
 {
     evm.sstore(
         slot: base_slot + 3,
         value: (token0 as u256) | ((token1 as u256) << 128),
     )
+}
+
+#[arithmetic(unchecked)]
+pub fn read_tokens_owed(_ base_slot: u256) -> (u128, u128) uses (evm: mut Evm) {
+    let word = slot3(base_slot)
+    ((word & MASK_U128).downcast_unchecked(), ((word >> 128) & MASK_U128).downcast_unchecked())
 }
 
 #[arithmetic(unchecked)]
@@ -125,42 +131,22 @@ uses (evm: mut Evm)
 }
 
 #[arithmetic(unchecked)]
-pub fn set_position(
-    base_slot: u256,
-    liquidity_value: u128,
-    fee_growth_inside0_last_x128: u256,
-    fee_growth_inside1_last_x128: u256,
-    tokens_owed0_value: u128,
-    tokens_owed1_value: u128,
-)
-uses (evm: mut Evm)
-{
-    store_liquidity(base_slot, value: liquidity_value)
-    evm.sstore(slot: base_slot + 1, value: fee_growth_inside0_last_x128)
-    evm.sstore(slot: base_slot + 2, value: fee_growth_inside1_last_x128)
-    store_tokens_owed(
-        base_slot,
-        token0: tokens_owed0_value,
-        token1: tokens_owed1_value,
-    )
-}
-
-#[arithmetic(unchecked)]
 pub fn update(
     base_slot: u256,
     liquidity_delta: i128,
     fee_growth_inside0_x128: u256,
     fee_growth_inside1_x128: u256,
+    principal_owed0_delta: u128,
+    principal_owed1_delta: u128,
 )
 uses (evm: mut Evm)
 {
-    let (
-        liquidity_before,
-        fee_growth_inside0_last_x128,
-        fee_growth_inside1_last_x128,
-        tokens_owed0_before,
-        tokens_owed1_before,
-    ) = read_position(base_slot)
+    let liquidity_before = liquidity(base_slot)
+    let fee_growth_inside0_last_x128_before = fee_growth_inside0_last_x128(base_slot)
+    let fee_growth_inside1_last_x128_before = fee_growth_inside1_last_x128(base_slot)
+    let tokens_owed_word = slot3(base_slot)
+    let tokens_owed0_before: u128 = (tokens_owed_word & MASK_U128).downcast_unchecked()
+    let tokens_owed1_before: u128 = ((tokens_owed_word >> 128) & MASK_U128).downcast_unchecked()
 
     let liquidity_next = if liquidity_delta == 0 {
         require_short(
@@ -174,14 +160,14 @@ uses (evm: mut Evm)
         add_delta(liquidity_before, liquidity_delta)
     }
 
-    let tokens_owed0_delta: u128 = mul_div(
-        fee_growth_inside0_x128 - fee_growth_inside0_last_x128,
+    let fee_tokens_owed0_delta: u128 = mul_div(
+        fee_growth_inside0_x128 - fee_growth_inside0_last_x128_before,
         liquidity_before as u256,
         denominator: Q128,
     )
         .downcast_unchecked()
-    let tokens_owed1_delta: u128 = mul_div(
-        fee_growth_inside1_x128 - fee_growth_inside1_last_x128,
+    let fee_tokens_owed1_delta: u128 = mul_div(
+        fee_growth_inside1_x128 - fee_growth_inside1_last_x128_before,
         liquidity_before as u256,
         denominator: Q128,
     )
@@ -193,11 +179,14 @@ uses (evm: mut Evm)
     evm.sstore(slot: base_slot + 1, value: fee_growth_inside0_x128)
     evm.sstore(slot: base_slot + 2, value: fee_growth_inside1_x128)
 
-    if tokens_owed0_delta > 0 || tokens_owed1_delta > 0 {
-        store_tokens_owed(
+    let total_tokens_owed0_delta = fee_tokens_owed0_delta + principal_owed0_delta
+    let total_tokens_owed1_delta = fee_tokens_owed1_delta + principal_owed1_delta
+
+    if total_tokens_owed0_delta > 0 || total_tokens_owed1_delta > 0 {
+        set_tokens_owed(
             base_slot,
-            token0: tokens_owed0_before + tokens_owed0_delta,
-            token1: tokens_owed1_before + tokens_owed1_delta,
+            token0: tokens_owed0_before + total_tokens_owed0_delta,
+            token1: tokens_owed1_before + total_tokens_owed1_delta,
         )
     }
 }
