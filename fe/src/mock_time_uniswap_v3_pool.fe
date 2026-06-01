@@ -1414,7 +1414,8 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 code: MSG_SPL,
                 len: 3,
             )
-            store.slot0 = slot0_start.lock()
+            let mut slot0_next = slot0_start.lock()
+            store.slot0 = slot0_next
             let input_token = if zero_for_one {
                 store.token0
             } else {
@@ -1588,12 +1589,13 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 store.observation0_tick_cumulative = tick_cumulative.downcast_unchecked()
                 store
                     .observation0_seconds_per_liquidity_cumulative_x128 = seconds_per_liquidity_cumulative_x128
-                store.slot0 = store
-                    .slot0
+                slot0_next = slot0_next
                     .with_sqrt_price_x96(sqrt_price_x96)
                     .with_tick(tick_current.downcast_unchecked())
+                store.slot0 = slot0_next
             } else if sqrt_price_x96 != sqrt_price_start_x96 {
-                store.slot0 = store.slot0.with_sqrt_price_x96(sqrt_price_x96)
+                slot0_next = slot0_next.with_sqrt_price_x96(sqrt_price_x96)
+                store.slot0 = slot0_next
             }
             if liquidity_current != liquidity_start {
                 store.liquidity = liquidity_current
@@ -1653,7 +1655,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 topic1: ctx.caller().inner,
                 topic2: recipient.inner,
             )
-            store.slot0 = store.slot0.unlock()
+            store.slot0 = slot0_next.unlock()
             if zero_for_one {
                 return_pair(
                     amount0: amount_owed,
