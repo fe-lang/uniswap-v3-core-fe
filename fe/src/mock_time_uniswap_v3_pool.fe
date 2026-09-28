@@ -18,6 +18,7 @@ use super::libraries::safe_cast::to_int128
 use super::libraries::sqrt_price_math::{get_amount0_delta, get_amount1_delta}
 use super::libraries::tick
 use super::libraries::tick::tick_spacing_to_max_liquidity_per_tick
+use super::libraries::transfer_helper::safe_transfer
 use super::libraries::tick_bitmap::{flip_tick_at, int_key, next_initialized_tick_within_one_word_at}
 use super::libraries::unsafe_math::div_rounding_up
 use super::libraries::tick_math::{
@@ -389,33 +390,6 @@ uses (call: mut Call, evm: mut Evm)
         evm.mload(at(ptr, 96)).downcast_unchecked(),
         decode_int24_word(evm.mload(at(ptr, 128))).downcast_unchecked(),
     )
-}
-
-#[arithmetic(unchecked)]
-fn compact_transfer(token: Address, to: Address, value: u256)
-uses (evm: mut Evm)
-{
-    let ptr = ptr::alloc_bytes(68)
-    evm.mstore(addr: ptr, value: (0xa9059cbb as u256) << 224)
-    evm.mstore(addr: at(ptr, 4), value: to.inner)
-    evm.mstore(addr: at(ptr, 36), value)
-
-    let mut ret = MemBuffer::with_capacity(32)
-    let outcome = evm
-        .raw_call(
-            addr: token,
-            gas: evm.gas(),
-            value: 0,
-            args: span(ptr, 68),
-            ret: mut ret,
-        )
-    let ret_len = outcome.returndata_len()
-    assert(outcome.success())
-    if ret_len >= 32 {
-        assert(evm.mload(ret.ptr()) != 0)
-    } else {
-        assert(ret_len == 0)
-    }
 }
 
 #[arithmetic(unchecked)]
@@ -1348,14 +1322,14 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                     amount0 -= 1
                 }
                 store.protocol_fee0 -= amount0
-                compact_transfer(token: token0, to: recipient, value: amount0 as u256)
+                safe_transfer(token: token0, to: recipient, value: amount0 as u256)
             }
             if amount1 > 0 {
                 if amount1 == store.protocol_fee1 {
                     amount1 -= 1
                 }
                 store.protocol_fee1 -= amount1
-                compact_transfer(token: token1, to: recipient, value: amount1 as u256)
+                safe_transfer(token: token1, to: recipient, value: amount1 as u256)
             }
 
             let out = ptr::alloc_bytes(64)
@@ -1393,10 +1367,10 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             let balance0_before = balance_of(token: token0, account: ctx.address())
             let balance1_before = balance_of(token: token1, account: ctx.address())
             if amount0 > 0 {
-                compact_transfer(token: token0, to: recipient, value: amount0)
+                safe_transfer(token: token0, to: recipient, value: amount0)
             }
             if amount1 > 0 {
-                compact_transfer(token: token1, to: recipient, value: amount1)
+                safe_transfer(token: token1, to: recipient, value: amount1)
             }
             flash_callback(caller: ctx.caller(), fee0, fee1, data_start)
             let balance0_after = balance_of(token: token0, account: ctx.address())
@@ -1662,7 +1636,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
 
             let balance_before = balance_of(token: input_token, account: ctx.address())
             if amount_out_total > 0 {
-                compact_transfer(
+                safe_transfer(
                     token: output_token,
                     to: recipient,
                     value: amount_out_total,
@@ -1905,10 +1879,10 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 )
             }
             if amount0 > 0 {
-                compact_transfer(token: token0, to: recipient, value: amount0 as u256)
+                safe_transfer(token: token0, to: recipient, value: amount0 as u256)
             }
             if amount1 > 0 {
-                compact_transfer(token: token1, to: recipient, value: amount1 as u256)
+                safe_transfer(token: token1, to: recipient, value: amount1 as u256)
             }
             store.slot0 = store.slot0.unlock()
             let log_data = ptr::alloc_bytes(96)

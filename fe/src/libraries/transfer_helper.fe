@@ -4,16 +4,14 @@ use std::evm::{Address, Call, Evm, RawMem}
 
 const TRANSFER_SELECTOR: u256 = 0xa9059cbb
 
-pub fn safe_transfer(token: Address, to: Address, value: u256)
-uses (call: mut Call, evm: mut Evm)
-{
+pub fn safe_transfer(token: Address, to: Address, value: u256) uses (evm: mut Evm) {
     let ptr = ptr::alloc_bytes(68)
     evm.mstore(addr: ptr, value: TRANSFER_SELECTOR << 224)
     evm.mstore(addr: at(ptr, 4), value: to.inner)
     evm.mstore(addr: at(ptr, 36), value: value)
 
     let mut ret = MemBuffer::with_capacity(32)
-    let outcome = call
+    let outcome = evm
         .raw_call(
             addr: token,
             gas: evm.gas(),
