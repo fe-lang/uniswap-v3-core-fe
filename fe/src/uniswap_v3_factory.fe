@@ -117,7 +117,7 @@ fn clear_parameters() uses (evm: mut Evm) {
 fn pool_salt(token0: Address, token1: Address, fee: Uint24) -> u256
 uses (evm: mut Evm)
 {
-    let ptr = 0
+    let ptr = std::evm::mem::alloc(96)
     evm.mstore(addr: ptr, value: token0.inner)
     evm.mstore(addr: ptr + 32, value: token1.inner)
     evm.mstore(addr: ptr + 64, value: fee.val as u256)

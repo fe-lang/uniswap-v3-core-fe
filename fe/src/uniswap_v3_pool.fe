@@ -379,47 +379,50 @@ fn factory_owner(factory: Address) -> u256 uses (call: mut Call, evm: mut Evm) {
 fn load_deployer_parameters(deployer: Address) -> (Address, Address, Address, u32, i32)
 uses (call: mut Call, evm: mut Evm)
 {
-    evm.mstore(addr: 0, value: (0x89035730 as u256) << 224)
+    let ptr = std::evm::mem::alloc(160)
+    evm.mstore(addr: ptr, value: (0x89035730 as u256) << 224)
     assert(
         call.raw_staticcall(
             addr: deployer,
             gas: evm.gas(),
-            args_offset: 0,
+            args_offset: ptr,
             args_len: 4,
             ret_offset: 0,
             ret_len: 0,
         ),
     )
-    evm.returndatacopy(dest: 0, offset: 0, len: 160)
+    evm.returndatacopy(dest: ptr, offset: 0, len: 160)
     (
-        Address { inner: evm.mload(0) },
-        Address { inner: evm.mload(32) },
-        Address { inner: evm.mload(64) },
-        evm.mload(96).downcast_unchecked(),
-        decode_int24_word(evm.mload(128)).downcast_unchecked(),
+        Address { inner: evm.mload(ptr) },
+        Address { inner: evm.mload(ptr + 32) },
+        Address { inner: evm.mload(ptr + 64) },
+        evm.mload(ptr + 96).downcast_unchecked(),
+        decode_int24_word(evm.mload(ptr + 128)).downcast_unchecked(),
     )
 }
 
 #[arithmetic(unchecked)]
-fn transfer_scratch(token: Address, to: Address, value: u256)
+fn compact_transfer(token: Address, to: Address, value: u256)
 uses (evm: mut Evm)
 {
-    evm.mstore(addr: 0, value: (0xa9059cbb as u256) << 224)
-    evm.mstore(addr: 4, value: to.inner)
-    evm.mstore(addr: 36, value)
+    let ptr = std::evm::mem::alloc(68)
+    evm.mstore(addr: ptr, value: (0xa9059cbb as u256) << 224)
+    evm.mstore(addr: ptr + 4, value: to.inner)
+    evm.mstore(addr: ptr + 36, value)
 
-    let success = evm.raw_call(
+    let success = evm
+        .raw_call(
             addr: token,
             gas: evm.gas(),
             value: 0,
-            args_offset: 0,
+            args_offset: ptr,
             args_len: 68,
         )
     let ret_len = evm.returndatasize()
     assert(success)
     if ret_len >= 32 {
-        evm.returndatacopy(dest: 0, offset: 0, len: 32)
-        assert(evm.mload(0) != 0)
+        evm.returndatacopy(dest: ptr, offset: 0, len: 32)
+        assert(evm.mload(ptr) != 0)
     } else {
         assert(ret_len == 0)
     }
@@ -860,12 +863,13 @@ fn emit_mint(
 )
 uses (evm: mut Evm)
 {
-    evm.mstore(addr: 0, value: sender.inner)
-    evm.mstore(addr: 32, value: amount as u256)
-    evm.mstore(addr: 64, value: amount0)
-    evm.mstore(addr: 96, value: amount1)
+    let ptr = std::evm::mem::alloc(128)
+    evm.mstore(addr: ptr, value: sender.inner)
+    evm.mstore(addr: ptr + 32, value: amount as u256)
+    evm.mstore(addr: ptr + 64, value: amount0)
+    evm.mstore(addr: ptr + 96, value: amount1)
     evm.log4(
-        offset: 0,
+        offset: ptr,
         len: 128,
         topic0: MINT_TOPIC,
         topic1: owner.inner,
@@ -885,11 +889,12 @@ fn emit_burn(
 )
 uses (evm: mut Evm)
 {
-    evm.mstore(addr: 0, value: amount as u256)
-    evm.mstore(addr: 32, value: amount0)
-    evm.mstore(addr: 64, value: amount1)
+    let ptr = std::evm::mem::alloc(96)
+    evm.mstore(addr: ptr, value: amount as u256)
+    evm.mstore(addr: ptr + 32, value: amount0)
+    evm.mstore(addr: ptr + 64, value: amount1)
     evm.log4(
-        offset: 0,
+        offset: ptr,
         len: 96,
         topic0: BURN_TOPIC,
         topic1: owner.inner,
@@ -909,12 +914,13 @@ fn emit_flash(
 )
 uses (evm: mut Evm)
 {
-    evm.mstore(addr: 0, value: amount0)
-    evm.mstore(addr: 32, value: amount1)
-    evm.mstore(addr: 64, value: paid0)
-    evm.mstore(addr: 96, value: paid1)
+    let ptr = std::evm::mem::alloc(128)
+    evm.mstore(addr: ptr, value: amount0)
+    evm.mstore(addr: ptr + 32, value: amount1)
+    evm.mstore(addr: ptr + 64, value: paid0)
+    evm.mstore(addr: ptr + 96, value: paid1)
     evm.log3(
-        offset: 0,
+        offset: ptr,
         len: 128,
         topic0: FLASH_TOPIC,
         topic1: sender.inner,
@@ -1278,11 +1284,12 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
             let fee_protocol: u8 = ((feeProtocol0 as u256) | ((feeProtocol1 as u256) << 4))
                 .downcast_unchecked()
             store.slot0 = store.slot0.with_fee_protocol(fee_protocol)
-            evm.mstore(addr: 0, value: (old & 0x0f) as u256)
-            evm.mstore(addr: 32, value: (old >> 4) as u256)
-            evm.mstore(addr: 64, value: feeProtocol0 as u256)
-            evm.mstore(addr: 96, value: feeProtocol1 as u256)
-            evm.log1(offset: 0, len: 128, topic0: SET_FEE_PROTOCOL_TOPIC)
+            let log_data = std::evm::mem::alloc(128)
+            evm.mstore(addr: log_data, value: (old & 0x0f) as u256)
+            evm.mstore(addr: log_data + 32, value: (old >> 4) as u256)
+            evm.mstore(addr: log_data + 64, value: feeProtocol0 as u256)
+            evm.mstore(addr: log_data + 96, value: feeProtocol1 as u256)
+            evm.log1(offset: log_data, len: 128, topic0: SET_FEE_PROTOCOL_TOPIC)
             store.slot0 = store.slot0.unlock()
         }
 
@@ -1305,14 +1312,14 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
                     amount0 -= 1
                 }
                 store.protocol_fee0 -= amount0
-                transfer_scratch(token: store.token0, to: recipient, value: amount0 as u256)
+                compact_transfer(token: store.token0, to: recipient, value: amount0 as u256)
             }
             if amount1 > 0 {
                 if amount1 == store.protocol_fee1 {
                     amount1 -= 1
                 }
                 store.protocol_fee1 -= amount1
-                transfer_scratch(token: store.token1, to: recipient, value: amount1 as u256)
+                compact_transfer(token: store.token1, to: recipient, value: amount1 as u256)
             }
 
             evm.mstore(addr: 0, value: amount0 as u256)
@@ -1350,10 +1357,10 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
             let balance0_before = balance_of(token: store.token0, account: ctx.address())
             let balance1_before = balance_of(token: store.token1, account: ctx.address())
             if amount0 > 0 {
-                transfer_scratch(token: store.token0, to: recipient, value: amount0)
+                compact_transfer(token: store.token0, to: recipient, value: amount0)
             }
             if amount1 > 0 {
-                transfer_scratch(token: store.token1, to: recipient, value: amount1)
+                compact_transfer(token: store.token1, to: recipient, value: amount1)
             }
             flash_callback(caller: ctx.caller(), fee0, fee1, data_start)
             let balance0_after = balance_of(token: store.token0, account: ctx.address())
@@ -1627,7 +1634,7 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
 
             let balance_before = balance_of(token: input_token, account: ctx.address())
             if amount_out_total > 0 {
-                transfer_scratch(
+                compact_transfer(
                     token: output_token,
                     to: recipient,
                     value: amount_out_total,
@@ -1656,13 +1663,14 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
                 code: MSG_IIA,
                 len: 3,
             )
-            evm.mstore(addr: 0, value: amount0_delta)
-            evm.mstore(addr: 32, value: amount1_delta)
-            evm.mstore(addr: 64, value: sqrt_price_x96)
-            evm.mstore(addr: 96, value: liquidity_current as u256)
-            evm.mstore(addr: 128, value: int_key(tick_current))
+            let log_data = std::evm::mem::alloc(160)
+            evm.mstore(addr: log_data, value: amount0_delta)
+            evm.mstore(addr: log_data + 32, value: amount1_delta)
+            evm.mstore(addr: log_data + 64, value: sqrt_price_x96)
+            evm.mstore(addr: log_data + 96, value: liquidity_current as u256)
+            evm.mstore(addr: log_data + 128, value: int_key(tick_current))
             evm.log3(
-                offset: 0,
+                offset: log_data,
                 len: 160,
                 topic0: SWAP_TOPIC,
                 topic1: ctx.caller().inner,
@@ -1871,17 +1879,18 @@ pub contract UniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
                 )
             }
             if amount0 > 0 {
-                transfer_scratch(token: store.token0, to: recipient, value: amount0 as u256)
+                compact_transfer(token: store.token0, to: recipient, value: amount0 as u256)
             }
             if amount1 > 0 {
-                transfer_scratch(token: store.token1, to: recipient, value: amount1 as u256)
+                compact_transfer(token: store.token1, to: recipient, value: amount1 as u256)
             }
             store.slot0 = store.slot0.unlock()
-            evm.mstore(addr: 0, value: recipient.inner)
-            evm.mstore(addr: 32, value: amount0 as u256)
-            evm.mstore(addr: 64, value: amount1 as u256)
+            let log_data = std::evm::mem::alloc(96)
+            evm.mstore(addr: log_data, value: recipient.inner)
+            evm.mstore(addr: log_data + 32, value: amount0 as u256)
+            evm.mstore(addr: log_data + 64, value: amount1 as u256)
             evm.log4(
-                offset: 0,
+                offset: log_data,
                 len: 96,
                 topic0: COLLECT_TOPIC,
                 topic1: ctx.caller().inner,
