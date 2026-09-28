@@ -742,7 +742,7 @@ uses (call: mut Call, evm: mut Evm)
     let data_len = evm.calldataload(data_start)
     let data_size = 32 + (((data_len + 31) / 32) * 32)
     let len = 100 + data_size
-    let ptr = 512
+    let ptr = std::evm::mem::alloc(len)
     evm.mstore(addr: ptr, value: (0xd3487997 as u256) << 224)
     evm.mstore(addr: ptr + 4, value: amount0)
     evm.mstore(addr: ptr + 36, value: amount1)
@@ -767,24 +767,25 @@ uses (call: mut Call, evm: mut Evm)
 fn flash_callback(caller: Address, fee0: u256, fee1: u256, data_start: u256)
 uses (call: mut Call, evm: mut Evm)
 {
-    evm.mstore(addr: 0, value: FLASH_CALLBACK_SELECTOR << 224)
-    evm.mstore(addr: 4, value: fee0)
-    evm.mstore(addr: 36, value: fee1)
-    evm.mstore(addr: 68, value: 96)
-    evm.mstore(addr: 100, value: 96)
-    evm.calldatacopy(dest: 132, offset: data_start + 32, len: 96)
+    let ptr = std::evm::mem::alloc(228)
+    evm.mstore(addr: ptr, value: FLASH_CALLBACK_SELECTOR << 224)
+    evm.mstore(addr: ptr + 4, value: fee0)
+    evm.mstore(addr: ptr + 36, value: fee1)
+    evm.mstore(addr: ptr + 68, value: 96)
+    evm.mstore(addr: ptr + 100, value: 96)
+    evm.calldatacopy(dest: ptr + 132, offset: data_start + 32, len: 96)
     let success = call
         .raw_call(
             addr: caller,
             gas: evm.gas(),
             value: 0,
-            args_offset: 0,
+            args_offset: ptr,
             args_len: 228,
         )
     if !success {
         let ret_len = evm.returndatasize()
-        evm.returndatacopy(dest: 0, offset: 0, len: ret_len)
-        evm.revert(offset: 0, len: ret_len)
+        evm.returndatacopy(dest: ptr, offset: 0, len: ret_len)
+        evm.revert(offset: ptr, len: ret_len)
     }
 }
 
@@ -800,7 +801,7 @@ uses (call: mut Call, evm: mut Evm)
     let data_len = evm.calldataload(data_start)
     let data_size = 32 + (((data_len + 31) / 32) * 32)
     let len = 100 + data_size
-    let ptr = 512
+    let ptr = std::evm::mem::alloc(len)
     evm.mstore(addr: ptr, value: SWAP_CALLBACK_SELECTOR << 224)
     evm.mstore(addr: ptr + 4, value: amount0_delta)
     evm.mstore(addr: ptr + 36, value: amount1_delta)
