@@ -1,3 +1,5 @@
+use core::ptr
+use super::mem::{at, span}
 use std::abi::sol::{self, Int24}
 use std::evm::ops::signextend
 use std::evm::{Evm, RawMem, RawOps, RawStorage}
@@ -26,10 +28,10 @@ const U256_HALF_MAX: u256 = 0x7fffffffffffffffffffffffffffffffffffffffffffffffff
 
 #[arithmetic(unchecked)]
 fn mapping_slot_at(_ tick: i256, ticks_slot: u256) -> u256 uses (evm: mut Evm) {
-    let ptr = 0
+    let ptr = ptr::alloc_bytes(64)
     evm.mstore(addr: ptr, value: int_key(tick))
-    evm.mstore(addr: ptr + 32, value: ticks_slot)
-    evm.keccak256(offset: ptr, len: 64)
+    evm.mstore(addr: at(ptr, 32), value: ticks_slot)
+    evm.keccak256(data: span(ptr, 64))
 }
 
 #[arithmetic(unchecked)]

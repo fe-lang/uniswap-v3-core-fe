@@ -1,3 +1,5 @@
+use core::ptr
+use super::libraries::mem::{at, span}
 use std::abi::sol::{self, Uint160}
 use std::evm::{Address, Ctx, Evm, RawMem}
 
@@ -46,15 +48,15 @@ fn as_address(_ value: u256) -> Address {
 }
 
 fn address_payload(_ sender: Address) -> Bytes uses (evm: mut Evm) {
-    let ptr = std::evm::mem::alloc(64)
+    let ptr = ptr::alloc_bytes(64)
     evm.mstore(addr: ptr, value: 32)
-    evm.mstore(addr: ptr + 32, value: sender.inner)
-    Bytes { data: ptr, len: 32, size: 64 }
+    evm.mstore(addr: at(ptr, 32), value: sender.inner)
+    Bytes::from_abi_tail(data: ptr, len: 32, size: 64)
 }
 
 fn decode_sender(_ data: Bytes) -> Address uses (evm: Evm) {
     assert(data.len() >= 32)
-    as_address(evm.mload(data.data + 32))
+    as_address(data.word_at(0))
 }
 
 fn token0(_ pool: Address) -> Address uses (evm: mut Evm) {

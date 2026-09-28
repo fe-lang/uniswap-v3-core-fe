@@ -1,5 +1,7 @@
+use core::ptr::{self, MemBuffer}
+use super::libraries::mem::{at, span}
 use std::evm::ops::signextend
-use std::evm::{Address, Call, Ctx, Evm, Log, RawMem, RawOps}
+use std::evm::{Address, Call, Ctx, Evm, Log, RawMem, RawOps, bubble_last_revert}
 use super::libraries::fixed_point_128::Q128
 use super::libraries::fixed_point_96::Q96
 use super::libraries::full_math::{mul_div, mul_div_rounding_up}
@@ -178,11 +180,12 @@ fn decode_int24_word(_ word: u256) -> i256 {
 #[arithmetic(unchecked)]
 fn require_msg(_ evm: mut Evm, condition: bool, code: u256, len: u256) {
     if !condition {
-        evm.mstore(addr: 0, value: ERROR_STRING_SELECTOR_WORD)
-        evm.mstore(addr: 4, value: 32)
-        evm.mstore(addr: 36, value: len)
-        evm.mstore(addr: 68, value: code)
-        evm.revert(offset: 0, len: 100)
+        let out = ptr::alloc_bytes(100)
+        evm.mstore(addr: out, value: ERROR_STRING_SELECTOR_WORD)
+        evm.mstore(addr: at(out, 4), value: 32)
+        evm.mstore(addr: at(out, 36), value: len)
+        evm.mstore(addr: at(out, 68), value: code)
+        evm.revert(data: span(out, 100))
     }
 }
 
@@ -337,62 +340,58 @@ fn next_sqrt_price_amount1_sub(sqrt_p_x96: u256, _ liquidity: u128, amount: u256
 fn balance_of(token: Address, account: Address) -> u256
 uses (call: mut Call, evm: mut Evm)
 {
-    evm.mstore(addr: 0, value: (0x70a08231 as u256) << 224)
-    evm.mstore(addr: 4, value: account.inner)
-    assert(
-        call.raw_staticcall(
+    let args = ptr::alloc_bytes(36)
+    evm.mstore(addr: args, value: (0x70a08231 as u256) << 224)
+    evm.mstore(addr: at(args, 4), value: account.inner)
+    let mut ret = MemBuffer::with_capacity(32)
+    let outcome = call.raw_staticcall(
             addr: token,
             gas: 1000000,
-            args_offset: 0,
-            args_len: 36,
-            ret_offset: 0,
-            ret_len: 0,
-        ),
-    )
-    evm.returndatacopy(dest: 0, offset: 0, len: 32)
-    evm.mload(0)
+            args: span(args, 36),
+            ret: mut ret,
+        )
+    assert(outcome.success() && outcome.returndata_len() >= 32)
+    evm.mload(ret.ptr())
 }
 
 #[arithmetic(unchecked)]
 fn factory_owner(factory: Address) -> u256 uses (call: mut Call, evm: mut Evm) {
-    evm.mstore(addr: 0, value: (0x8da5cb5b as u256) << 224)
-    assert(
-        call.raw_staticcall(
+    let args = ptr::alloc_bytes(32)
+    evm.mstore(addr: args, value: (0x8da5cb5b as u256) << 224)
+    let mut ret = MemBuffer::with_capacity(32)
+    let outcome = call
+        .raw_staticcall(
             addr: factory,
             gas: evm.gas(),
-            args_offset: 0,
-            args_len: 4,
-            ret_offset: 0,
-            ret_len: 0,
-        ),
-    )
-    evm.returndatacopy(dest: 0, offset: 0, len: 32)
-    evm.mload(0)
+            args: span(args, 4),
+            ret: mut ret,
+        )
+    assert(outcome.success() && outcome.returndata_len() >= 32)
+    evm.mload(ret.ptr())
 }
 
 #[arithmetic(unchecked)]
 fn load_deployer_parameters(deployer: Address) -> (Address, Address, Address, u32, i32)
 uses (call: mut Call, evm: mut Evm)
 {
-    let ptr = std::evm::mem::alloc(160)
-    evm.mstore(addr: ptr, value: (0x89035730 as u256) << 224)
-    assert(
-        call.raw_staticcall(
+    let args = ptr::alloc_bytes(32)
+    evm.mstore(addr: args, value: (0x89035730 as u256) << 224)
+    let mut ret = MemBuffer::with_capacity(160)
+    let outcome = call
+        .raw_staticcall(
             addr: deployer,
             gas: evm.gas(),
-            args_offset: ptr,
-            args_len: 4,
-            ret_offset: 0,
-            ret_len: 0,
-        ),
-    )
-    evm.returndatacopy(dest: ptr, offset: 0, len: 160)
+            args: span(args, 4),
+            ret: mut ret,
+        )
+    assert(outcome.success() && outcome.returndata_len() >= 160)
+    let ptr = ret.ptr()
     (
         Address { inner: evm.mload(ptr) },
-        Address { inner: evm.mload(ptr + 32) },
-        Address { inner: evm.mload(ptr + 64) },
-        evm.mload(ptr + 96).downcast_unchecked(),
-        decode_int24_word(evm.mload(ptr + 128)).downcast_unchecked(),
+        Address { inner: evm.mload(at(ptr, 32)) },
+        Address { inner: evm.mload(at(ptr, 64)) },
+        evm.mload(at(ptr, 96)).downcast_unchecked(),
+        decode_int24_word(evm.mload(at(ptr, 128))).downcast_unchecked(),
     )
 }
 
@@ -400,24 +399,24 @@ uses (call: mut Call, evm: mut Evm)
 fn compact_transfer(token: Address, to: Address, value: u256)
 uses (evm: mut Evm)
 {
-    let ptr = std::evm::mem::alloc(68)
+    let ptr = ptr::alloc_bytes(68)
     evm.mstore(addr: ptr, value: (0xa9059cbb as u256) << 224)
-    evm.mstore(addr: ptr + 4, value: to.inner)
-    evm.mstore(addr: ptr + 36, value)
+    evm.mstore(addr: at(ptr, 4), value: to.inner)
+    evm.mstore(addr: at(ptr, 36), value)
 
-    let success = evm
+    let mut ret = MemBuffer::with_capacity(32)
+    let outcome = evm
         .raw_call(
             addr: token,
             gas: evm.gas(),
             value: 0,
-            args_offset: ptr,
-            args_len: 68,
+            args: span(ptr, 68),
+            ret: mut ret,
         )
-    let ret_len = evm.returndatasize()
-    assert(success)
+    let ret_len = outcome.returndata_len()
+    assert(outcome.success())
     if ret_len >= 32 {
-        evm.returndatacopy(dest: ptr, offset: 0, len: 32)
-        assert(evm.mload(ptr) != 0)
+        assert(evm.mload(ret.ptr()) != 0)
     } else {
         assert(ret_len == 0)
     }
@@ -742,24 +741,29 @@ uses (call: mut Call, evm: mut Evm)
     let data_len = evm.calldataload(data_start)
     let data_size = 32 + (((data_len + 31) / 32) * 32)
     let len = 100 + data_size
-    let ptr = std::evm::mem::alloc(len)
+    let mut buf = MemBuffer::alloc(len)
+    let ptr = buf.ptr()
     evm.mstore(addr: ptr, value: (0xd3487997 as u256) << 224)
-    evm.mstore(addr: ptr + 4, value: amount0)
-    evm.mstore(addr: ptr + 36, value: amount1)
-    evm.mstore(addr: ptr + 68, value: 96)
-    evm.calldatacopy(dest: ptr + 100, offset: data_start, len: data_size)
-    let success = call
+    evm.mstore(addr: at(ptr, 4), value: amount0)
+    evm.mstore(addr: at(ptr, 36), value: amount1)
+    evm.mstore(addr: at(ptr, 68), value: 96)
+    evm.calldatacopy(
+        dest: mut buf,
+        dest_offset: 100,
+        src_offset: data_start,
+        len: data_size,
+    )
+    let mut ret = MemBuffer::empty()
+    let outcome = call
         .raw_call(
             addr: caller,
             gas: evm.gas(),
             value: 0,
-            args_offset: ptr,
-            args_len: len,
+            args: buf.span(),
+            ret: mut ret,
         )
-    if !success {
-        let ret_len = evm.returndatasize()
-        evm.returndatacopy(dest: ptr, offset: 0, len: ret_len)
-        evm.revert(offset: ptr, len: ret_len)
+    if !outcome.success() {
+        bubble_last_revert()
     }
 }
 
@@ -767,25 +771,30 @@ uses (call: mut Call, evm: mut Evm)
 fn flash_callback(caller: Address, fee0: u256, fee1: u256, data_start: u256)
 uses (call: mut Call, evm: mut Evm)
 {
-    let ptr = std::evm::mem::alloc(228)
+    let mut buf = MemBuffer::alloc(228)
+    let ptr = buf.ptr()
     evm.mstore(addr: ptr, value: FLASH_CALLBACK_SELECTOR << 224)
-    evm.mstore(addr: ptr + 4, value: fee0)
-    evm.mstore(addr: ptr + 36, value: fee1)
-    evm.mstore(addr: ptr + 68, value: 96)
-    evm.mstore(addr: ptr + 100, value: 96)
-    evm.calldatacopy(dest: ptr + 132, offset: data_start + 32, len: 96)
-    let success = call
+    evm.mstore(addr: at(ptr, 4), value: fee0)
+    evm.mstore(addr: at(ptr, 36), value: fee1)
+    evm.mstore(addr: at(ptr, 68), value: 96)
+    evm.mstore(addr: at(ptr, 100), value: 96)
+    evm.calldatacopy(
+        dest: mut buf,
+        dest_offset: 132,
+        src_offset: data_start + 32,
+        len: 96,
+    )
+    let mut ret = MemBuffer::empty()
+    let outcome = call
         .raw_call(
             addr: caller,
             gas: evm.gas(),
             value: 0,
-            args_offset: ptr,
-            args_len: 228,
+            args: buf.span(),
+            ret: mut ret,
         )
-    if !success {
-        let ret_len = evm.returndatasize()
-        evm.returndatacopy(dest: ptr, offset: 0, len: ret_len)
-        evm.revert(offset: ptr, len: ret_len)
+    if !outcome.success() {
+        bubble_last_revert()
     }
 }
 
@@ -801,43 +810,49 @@ uses (call: mut Call, evm: mut Evm)
     let data_len = evm.calldataload(data_start)
     let data_size = 32 + (((data_len + 31) / 32) * 32)
     let len = 100 + data_size
-    let ptr = std::evm::mem::alloc(len)
+    let mut buf = MemBuffer::alloc(len)
+    let ptr = buf.ptr()
     evm.mstore(addr: ptr, value: SWAP_CALLBACK_SELECTOR << 224)
-    evm.mstore(addr: ptr + 4, value: amount0_delta)
-    evm.mstore(addr: ptr + 36, value: amount1_delta)
-    evm.mstore(addr: ptr + 68, value: 96)
-    evm.calldatacopy(dest: ptr + 100, offset: data_start, len: data_size)
-    let success = call
+    evm.mstore(addr: at(ptr, 4), value: amount0_delta)
+    evm.mstore(addr: at(ptr, 36), value: amount1_delta)
+    evm.mstore(addr: at(ptr, 68), value: 96)
+    evm.calldatacopy(
+        dest: mut buf,
+        dest_offset: 100,
+        src_offset: data_start,
+        len: data_size,
+    )
+    let mut ret = MemBuffer::empty()
+    let outcome = call
         .raw_call(
             addr: caller,
             gas: evm.gas(),
             value: 0,
-            args_offset: ptr,
-            args_len: len,
+            args: buf.span(),
+            ret: mut ret,
         )
-    if !success {
-        let ret_len = evm.returndatasize()
-        evm.returndatacopy(dest: ptr, offset: 0, len: ret_len)
-        evm.revert(offset: ptr, len: ret_len)
+    if !outcome.success() {
+        bubble_last_revert()
     }
 }
 
 #[arithmetic(unchecked)]
 fn emit_initialize(sqrt_price_x96: u256, tick: i32) uses (evm: mut Evm) {
-    evm.mstore(addr: 0, value: sqrt_price_x96)
-    evm.mstore(addr: 32, value: int24_abi_word(tick))
-    evm.log1(offset: 0, len: 64, topic0: INITIALIZE_TOPIC)
+    let out = ptr::alloc_bytes(64)
+    evm.mstore(addr: out, value: sqrt_price_x96)
+    evm.mstore(addr: at(out, 32), value: int24_abi_word(tick))
+    evm.log1(data: span(out, 64), topic0: INITIALIZE_TOPIC)
 }
 
 #[arithmetic(unchecked)]
 fn emit_increase_observation_cardinality_next(old: u16, new: u16)
 uses (evm: mut Evm)
 {
-    evm.mstore(addr: 0, value: old as u256)
-    evm.mstore(addr: 32, value: new as u256)
+    let out = ptr::alloc_bytes(64)
+    evm.mstore(addr: out, value: old as u256)
+    evm.mstore(addr: at(out, 32), value: new as u256)
     evm.log1(
-        offset: 0,
-        len: 64,
+        data: span(out, 64),
         topic0: INCREASE_OBSERVATION_CARDINALITY_NEXT_TOPIC,
     )
 }
@@ -854,14 +869,13 @@ fn emit_mint(
 )
 uses (evm: mut Evm)
 {
-    let ptr = std::evm::mem::alloc(128)
+    let ptr = ptr::alloc_bytes(128)
     evm.mstore(addr: ptr, value: sender.inner)
-    evm.mstore(addr: ptr + 32, value: amount as u256)
-    evm.mstore(addr: ptr + 64, value: amount0)
-    evm.mstore(addr: ptr + 96, value: amount1)
+    evm.mstore(addr: at(ptr, 32), value: amount as u256)
+    evm.mstore(addr: at(ptr, 64), value: amount0)
+    evm.mstore(addr: at(ptr, 96), value: amount1)
     evm.log4(
-        offset: ptr,
-        len: 128,
+        data: span(ptr, 128),
         topic0: MINT_TOPIC,
         topic1: owner.inner,
         topic2: int24_abi_word(tick_lower),
@@ -880,13 +894,12 @@ fn emit_burn(
 )
 uses (evm: mut Evm)
 {
-    let ptr = std::evm::mem::alloc(96)
+    let ptr = ptr::alloc_bytes(96)
     evm.mstore(addr: ptr, value: amount as u256)
-    evm.mstore(addr: ptr + 32, value: amount0)
-    evm.mstore(addr: ptr + 64, value: amount1)
+    evm.mstore(addr: at(ptr, 32), value: amount0)
+    evm.mstore(addr: at(ptr, 64), value: amount1)
     evm.log4(
-        offset: ptr,
-        len: 96,
+        data: span(ptr, 96),
         topic0: BURN_TOPIC,
         topic1: owner.inner,
         topic2: int24_abi_word(tick_lower),
@@ -905,14 +918,13 @@ fn emit_flash(
 )
 uses (evm: mut Evm)
 {
-    let ptr = std::evm::mem::alloc(128)
+    let ptr = ptr::alloc_bytes(128)
     evm.mstore(addr: ptr, value: amount0)
-    evm.mstore(addr: ptr + 32, value: amount1)
-    evm.mstore(addr: ptr + 64, value: paid0)
-    evm.mstore(addr: ptr + 96, value: paid1)
+    evm.mstore(addr: at(ptr, 32), value: amount1)
+    evm.mstore(addr: at(ptr, 64), value: paid0)
+    evm.mstore(addr: at(ptr, 96), value: paid1)
     evm.log3(
-        offset: ptr,
-        len: 128,
+        data: span(ptr, 128),
         topic0: FLASH_TOPIC,
         topic1: sender.inner,
         topic2: recipient.inner,
@@ -927,23 +939,29 @@ fn return_snapshot(
 ) -> !
 uses (evm: mut Evm)
 {
-    evm.mstore(addr: 0, value: int_key(tick_cumulative_inside))
-    evm.mstore(addr: 32, value: seconds_per_liquidity_inside_x128)
-    evm.mstore(addr: 64, value: seconds_inside as u256)
-    evm.return_data(offset: 0, len: 96)
+    let out = ptr::alloc_bytes(96)
+    evm.mstore(addr: out, value: int_key(tick_cumulative_inside))
+    evm.mstore(
+        addr: at(out, 32),
+        value: seconds_per_liquidity_inside_x128,
+    )
+    evm.mstore(addr: at(out, 64), value: seconds_inside as u256)
+    evm.return_data(data: span(out, 96))
 }
 
 #[arithmetic(unchecked)]
 fn return_pair(amount0: u256, amount1: u256) -> ! uses (evm: mut Evm) {
-    evm.mstore(addr: 0, value: amount0)
-    evm.mstore(addr: 32, value: amount1)
-    evm.return_data(offset: 0, len: 64)
+    let out = ptr::alloc_bytes(64)
+    evm.mstore(addr: out, value: amount0)
+    evm.mstore(addr: at(out, 32), value: amount1)
+    evm.return_data(data: span(out, 64))
 }
 
 #[arithmetic(unchecked)]
 fn return_word(value: u256) -> ! uses (evm: mut Evm) {
-    evm.mstore(addr: 0, value)
-    evm.return_data(offset: 0, len: 32)
+    let out = ptr::alloc_bytes(32)
+    evm.mstore(addr: out, value)
+    evm.return_data(data: span(out, 32))
 }
 
 #[arithmetic(unchecked)]
@@ -958,14 +976,18 @@ fn return_slot0(
 ) -> !
 uses (evm: mut Evm)
 {
-    evm.mstore(addr: 0, value: sqrt_price_x96)
-    evm.mstore(addr: 32, value: int_key(tick as i256))
-    evm.mstore(addr: 64, value: observation_index as u256)
-    evm.mstore(addr: 96, value: observation_cardinality as u256)
-    evm.mstore(addr: 128, value: observation_cardinality_next as u256)
-    evm.mstore(addr: 160, value: fee_protocol as u256)
-    evm.mstore(addr: 192, value: if unlocked { 1 } else { 0 })
-    evm.return_data(offset: 0, len: 224)
+    let out = ptr::alloc_bytes(224)
+    evm.mstore(addr: out, value: sqrt_price_x96)
+    evm.mstore(addr: at(out, 32), value: int_key(tick as i256))
+    evm.mstore(addr: at(out, 64), value: observation_index as u256)
+    evm.mstore(addr: at(out, 96), value: observation_cardinality as u256)
+    evm.mstore(
+        addr: at(out, 128),
+        value: observation_cardinality_next as u256,
+    )
+    evm.mstore(addr: at(out, 160), value: fee_protocol as u256)
+    evm.mstore(addr: at(out, 192), value: if unlocked { 1 } else { 0 })
+    evm.return_data(data: span(out, 224))
 }
 
 #[arithmetic(unchecked)]
@@ -977,11 +999,15 @@ fn return_observation(
 ) -> !
 uses (evm: mut Evm)
 {
-    evm.mstore(addr: 0, value: block_timestamp as u256)
-    evm.mstore(addr: 32, value: int_key(tick_cumulative as i256))
-    evm.mstore(addr: 64, value: seconds_per_liquidity_cumulative_x128)
-    evm.mstore(addr: 96, value: if initialized { 1 } else { 0 })
-    evm.return_data(offset: 0, len: 128)
+    let out = ptr::alloc_bytes(128)
+    evm.mstore(addr: out, value: block_timestamp as u256)
+    evm.mstore(addr: at(out, 32), value: int_key(tick_cumulative as i256))
+    evm.mstore(
+        addr: at(out, 64),
+        value: seconds_per_liquidity_cumulative_x128,
+    )
+    evm.mstore(addr: at(out, 96), value: if initialized { 1 } else { 0 })
+    evm.return_data(data: span(out, 128))
 }
 
 #[arithmetic(unchecked)]
@@ -997,15 +1023,22 @@ fn return_tick_info(
 ) -> !
 uses (evm: mut Evm)
 {
-    evm.mstore(addr: 0, value: liquidity_gross as u256)
-    evm.mstore(addr: 32, value: int_key(liquidity_net as i256))
-    evm.mstore(addr: 64, value: fee_growth_outside0_x128)
-    evm.mstore(addr: 96, value: fee_growth_outside1_x128)
-    evm.mstore(addr: 128, value: int_key(tick_cumulative_outside))
-    evm.mstore(addr: 160, value: seconds_per_liquidity_outside_x128)
-    evm.mstore(addr: 192, value: seconds_outside as u256)
-    evm.mstore(addr: 224, value: if initialized { 1 } else { 0 })
-    evm.return_data(offset: 0, len: 256)
+    let out = ptr::alloc_bytes(256)
+    evm.mstore(addr: out, value: liquidity_gross as u256)
+    evm.mstore(addr: at(out, 32), value: int_key(liquidity_net as i256))
+    evm.mstore(addr: at(out, 64), value: fee_growth_outside0_x128)
+    evm.mstore(addr: at(out, 96), value: fee_growth_outside1_x128)
+    evm.mstore(
+        addr: at(out, 128),
+        value: int_key(tick_cumulative_outside),
+    )
+    evm.mstore(
+        addr: at(out, 160),
+        value: seconds_per_liquidity_outside_x128,
+    )
+    evm.mstore(addr: at(out, 192), value: seconds_outside as u256)
+    evm.mstore(addr: at(out, 224), value: if initialized { 1 } else { 0 })
+    evm.return_data(data: span(out, 256))
 }
 
 #[arithmetic(unchecked)]
@@ -1018,12 +1051,13 @@ fn return_position_info(
 ) -> !
 uses (evm: mut Evm)
 {
-    evm.mstore(addr: 0, value: liquidity_value as u256)
-    evm.mstore(addr: 32, value: fee_growth_inside0_last_x128)
-    evm.mstore(addr: 64, value: fee_growth_inside1_last_x128)
-    evm.mstore(addr: 96, value: tokens_owed0 as u256)
-    evm.mstore(addr: 128, value: tokens_owed1 as u256)
-    evm.return_data(offset: 0, len: 160)
+    let out = ptr::alloc_bytes(160)
+    evm.mstore(addr: out, value: liquidity_value as u256)
+    evm.mstore(addr: at(out, 32), value: fee_growth_inside0_last_x128)
+    evm.mstore(addr: at(out, 64), value: fee_growth_inside1_last_x128)
+    evm.mstore(addr: at(out, 96), value: tokens_owed0 as u256)
+    evm.mstore(addr: at(out, 128), value: tokens_owed1 as u256)
+    evm.return_data(data: span(out, 160))
 }
 
 pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
@@ -1285,12 +1319,12 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             let fee_protocol: u8 = ((feeProtocol0 as u256) | ((feeProtocol1 as u256) << 4))
                 .downcast_unchecked()
             store.slot0 = store.slot0.with_fee_protocol(fee_protocol)
-            let log_data = std::evm::mem::alloc(128)
+            let log_data = ptr::alloc_bytes(128)
             evm.mstore(addr: log_data, value: (old & 0x0f) as u256)
-            evm.mstore(addr: log_data + 32, value: (old >> 4) as u256)
-            evm.mstore(addr: log_data + 64, value: feeProtocol0 as u256)
-            evm.mstore(addr: log_data + 96, value: feeProtocol1 as u256)
-            evm.log1(offset: log_data, len: 128, topic0: SET_FEE_PROTOCOL_TOPIC)
+            evm.mstore(addr: at(log_data, 32), value: (old >> 4) as u256)
+            evm.mstore(addr: at(log_data, 64), value: feeProtocol0 as u256)
+            evm.mstore(addr: at(log_data, 96), value: feeProtocol1 as u256)
+            evm.log1(data: span(log_data, 128), topic0: SET_FEE_PROTOCOL_TOPIC)
             store.slot0 = store.slot0.unlock()
         }
 
@@ -1323,11 +1357,11 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 compact_transfer(token: store.token1, to: recipient, value: amount1 as u256)
             }
 
-            evm.mstore(addr: 0, value: amount0 as u256)
-            evm.mstore(addr: 32, value: amount1 as u256)
+            let out = ptr::alloc_bytes(64)
+            evm.mstore(addr: out, value: amount0 as u256)
+            evm.mstore(addr: at(out, 32), value: amount1 as u256)
             evm.log3(
-                offset: 0,
-                len: 64,
+                data: span(out, 64),
                 topic0: COLLECT_PROTOCOL_TOPIC,
                 topic1: ctx.caller().inner,
                 topic2: recipient.inner,
@@ -1664,15 +1698,14 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 code: MSG_IIA,
                 len: 3,
             )
-            let log_data = std::evm::mem::alloc(160)
+            let log_data = ptr::alloc_bytes(160)
             evm.mstore(addr: log_data, value: amount0_delta)
-            evm.mstore(addr: log_data + 32, value: amount1_delta)
-            evm.mstore(addr: log_data + 64, value: sqrt_price_x96)
-            evm.mstore(addr: log_data + 96, value: liquidity_current as u256)
-            evm.mstore(addr: log_data + 128, value: int_key(tick_current))
+            evm.mstore(addr: at(log_data, 32), value: amount1_delta)
+            evm.mstore(addr: at(log_data, 64), value: sqrt_price_x96)
+            evm.mstore(addr: at(log_data, 96), value: liquidity_current as u256)
+            evm.mstore(addr: at(log_data, 128), value: int_key(tick_current))
             evm.log3(
-                offset: log_data,
-                len: 160,
+                data: span(log_data, 160),
                 topic0: SWAP_TOPIC,
                 topic1: ctx.caller().inner,
                 topic2: recipient.inner,
@@ -1701,13 +1734,17 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 time_delta,
                 liquidity: store.liquidity,
             )
-            evm.mstore(addr: 0, value: 64)
-            evm.mstore(addr: 32, value: 128)
-            evm.mstore(addr: 64, value: 1)
-            evm.mstore(addr: 96, value: int_key(tick_cumulative))
-            evm.mstore(addr: 128, value: 1)
-            evm.mstore(addr: 160, value: seconds_per_liquidity_cumulative_x128)
-            evm.return_data(offset: 0, len: 192)
+            let out = ptr::alloc_bytes(192)
+            evm.mstore(addr: out, value: 64)
+            evm.mstore(addr: at(out, 32), value: 128)
+            evm.mstore(addr: at(out, 64), value: 1)
+            evm.mstore(addr: at(out, 96), value: int_key(tick_cumulative))
+            evm.mstore(addr: at(out, 128), value: 1)
+            evm.mstore(
+                addr: at(out, 160),
+                value: seconds_per_liquidity_cumulative_x128,
+            )
+            evm.return_data(data: span(out, 192))
         }
 
         Ticks uses (mut evm) {
@@ -1879,13 +1916,12 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 compact_transfer(token: store.token1, to: recipient, value: amount1 as u256)
             }
             store.slot0 = store.slot0.unlock()
-            let log_data = std::evm::mem::alloc(96)
+            let log_data = ptr::alloc_bytes(96)
             evm.mstore(addr: log_data, value: recipient.inner)
-            evm.mstore(addr: log_data + 32, value: amount0 as u256)
-            evm.mstore(addr: log_data + 64, value: amount1 as u256)
+            evm.mstore(addr: at(log_data, 32), value: amount0 as u256)
+            evm.mstore(addr: at(log_data, 64), value: amount1 as u256)
             evm.log4(
-                offset: log_data,
-                len: 96,
+                data: span(log_data, 96),
                 topic0: COLLECT_TOPIC,
                 topic1: ctx.caller().inner,
                 topic2: int24_abi_word(tick_lower.downcast_unchecked()),

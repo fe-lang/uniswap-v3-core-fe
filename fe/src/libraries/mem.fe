@@ -1,0 +1,11 @@
+use core::ptr::{self, MemSpan}
+
+/// The byte address `offset` bytes past `base`.
+pub fn at(_ base: *u8, _ offset: u256) -> *u8 {
+    ptr::offset_bytes(base, offset)
+}
+
+/// The byte range `[base, base + len)`.
+pub fn span(_ base: *u8, _ len: u256) -> MemSpan {
+    MemSpan::from_raw_parts(ptr: base, len)
+}

@@ -1,3 +1,5 @@
+use core::ptr
+use super::mem::{at, span}
 use std::evm::{Address, Evm, RawMem, RawStorage}
 use super::fixed_point_128::Q128
 use super::full_math::mul_div
@@ -20,20 +22,20 @@ fn checked_int24_word(_ value: i256) -> u256 {
 pub fn position_key(owner: Address, tick_lower: i256, tick_upper: i256) -> u256
 uses (evm: mut Evm)
 {
-    let ptr = 0
+    let ptr = ptr::alloc_bytes(32)
     let word = (owner.inner << 96)
         | (checked_int24_word(tick_lower) << 72)
         | (checked_int24_word(tick_upper) << 48)
     evm.mstore(addr: ptr, value: word)
-    evm.keccak256(offset: ptr, len: 26)
+    evm.keccak256(data: span(ptr, 26))
 }
 
 #[arithmetic(unchecked)]
 pub fn mapping_slot(key: u256, positions_slot: u256) -> u256 uses (evm: mut Evm) {
-    let ptr = 0
+    let ptr = ptr::alloc_bytes(64)
     evm.mstore(addr: ptr, value: key)
-    evm.mstore(addr: ptr + 32, value: positions_slot)
-    evm.keccak256(offset: ptr, len: 64)
+    evm.mstore(addr: at(ptr, 32), value: positions_slot)
+    evm.keccak256(data: span(ptr, 64))
 }
 
 #[arithmetic(unchecked)]

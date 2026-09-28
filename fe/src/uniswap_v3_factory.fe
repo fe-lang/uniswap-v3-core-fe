@@ -1,3 +1,5 @@
+use core::ptr::{self, MemSpan}
+use super::libraries::mem::{at, span}
 use std::abi::sol::{self, Int24, Uint24}
 use std::evm::{Address, Create, Ctx, Evm, Log, RawMem, RawStorage}
 use super::libraries::tick_bitmap::int_key
@@ -46,10 +48,10 @@ fn store_address(slot: u256, value: Address) uses (evm: mut Evm) {
 }
 
 fn mapping_slot(key: u256, slot: u256) -> u256 uses (evm: mut Evm) {
-    let ptr = 0
+    let ptr = ptr::alloc_bytes(64)
     evm.mstore(addr: ptr, value: key)
-    evm.mstore(addr: ptr + 32, value: slot)
-    evm.keccak256(offset: ptr, len: 64)
+    evm.mstore(addr: at(ptr, 32), value: slot)
+    evm.keccak256(data: span(ptr, 64))
 }
 
 fn fee_amount_tick_spacing_slot(_ fee: Uint24) -> u256 uses (evm: mut Evm) {
@@ -117,11 +119,11 @@ fn clear_parameters() uses (evm: mut Evm) {
 fn pool_salt(token0: Address, token1: Address, fee: Uint24) -> u256
 uses (evm: mut Evm)
 {
-    let ptr = std::evm::mem::alloc(96)
+    let ptr = ptr::alloc_bytes(96)
     evm.mstore(addr: ptr, value: token0.inner)
-    evm.mstore(addr: ptr + 32, value: token1.inner)
-    evm.mstore(addr: ptr + 64, value: fee.val as u256)
-    evm.keccak256(offset: ptr, len: 96)
+    evm.mstore(addr: at(ptr, 32), value: token1.inner)
+    evm.mstore(addr: at(ptr, 64), value: fee.val as u256)
+    evm.keccak256(data: span(ptr, 96))
 }
 
 fn check_not_delegate_call() uses (ctx: Ctx, evm: Evm) {
@@ -132,8 +134,7 @@ fn emit_owner_changed(old_owner: Address, new_owner: Address)
 uses (evm: mut Evm)
 {
     evm.log3(
-        offset: 0,
-        len: 0,
+        data: MemSpan::empty(),
         topic0: OWNER_CHANGED_TOPIC,
         topic1: old_owner.inner,
         topic2: new_owner.inner,
@@ -144,8 +145,7 @@ fn emit_fee_amount_enabled(fee: Uint24, tick_spacing: Int24)
 uses (evm: mut Evm)
 {
     evm.log3(
-        offset: 0,
-        len: 0,
+        data: MemSpan::empty(),
         topic0: FEE_AMOUNT_ENABLED_TOPIC,
         topic1: fee.val as u256,
         topic2: int24_abi_word(tick_spacing.val),
@@ -161,12 +161,11 @@ fn emit_pool_created(
 )
 uses (evm: mut Evm)
 {
-    let ptr = 0
+    let ptr = ptr::alloc_bytes(64)
     evm.mstore(addr: ptr, value: int24_abi_word(tick_spacing.val))
-    evm.mstore(addr: ptr + 32, value: pool.inner)
+    evm.mstore(addr: at(ptr, 32), value: pool.inner)
     evm.log4(
-        offset: ptr,
-        len: 64,
+        data: span(ptr, 64),
         topic0: POOL_CREATED_TOPIC,
         topic1: token0.inner,
         topic2: token1.inner,

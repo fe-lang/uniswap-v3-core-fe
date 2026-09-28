@@ -1,3 +1,5 @@
+use core::ptr
+use super::libraries::mem::{at, span}
 use std::evm::{Address, Create, Evm, Log, RawMem, RawOps, RawStorage}
 use super::libraries::tick_bitmap::int_key
 use super::mock_time_uniswap_v3_pool::MockTimeUniswapV3Pool
@@ -18,14 +20,14 @@ fn int24_word(_ value: i32) -> u256 {
 fn pool_salt(token0: Address, token1: Address, fee: u32, tick_spacing: i32) -> u256
 uses (evm: mut Evm)
 {
-    let ptr = std::evm::mem::alloc(0)
+    let ptr = ptr::alloc_bytes(72)
     evm.mstore(addr: ptr, value: token0.inner << 96)
-    evm.mstore(addr: ptr + 20, value: token1.inner << 96)
+    evm.mstore(addr: at(ptr, 20), value: token1.inner << 96)
     evm.mstore(
-        addr: ptr + 40,
+        addr: at(ptr, 40),
         value: (((fee as u256) << 24) | int24_word(tick_spacing)) << 208,
     )
-    evm.keccak256(offset: ptr, len: 46)
+    evm.keccak256(data: span(ptr, 46))
 }
 
 #[arithmetic(unchecked)]
@@ -62,19 +64,27 @@ fn clear_parameters() uses (evm: mut Evm) {
 
 #[arithmetic(unchecked)]
 fn emit_pool_deployed(_ pool: Address) uses (evm: mut Evm) {
-    evm.mstore(addr: 0, value: pool.inner)
-    evm.log1(offset: 0, len: 32, topic0: POOL_DEPLOYED_TOPIC)
+    let ptr = ptr::alloc_bytes(32)
+    evm.mstore(addr: ptr, value: pool.inner)
+    evm.log1(data: span(ptr, 32), topic0: POOL_DEPLOYED_TOPIC)
 }
 
 #[arithmetic(unchecked)]
 fn return_parameters() uses (evm: mut Evm) {
     let packed = evm.sload(PARAMETERS_PACKED_SLOT)
-    evm.mstore(addr: 0, value: evm.sload(PARAMETERS_FACTORY_SLOT))
-    evm.mstore(addr: 32, value: evm.sload(PARAMETERS_TOKEN0_SLOT))
-    evm.mstore(addr: 64, value: evm.sload(PARAMETERS_TOKEN1_SLOT))
-    evm.mstore(addr: 96, value: packed & MASK_U24)
-    evm.mstore(addr: 128, value: packed >> 24)
-    evm.return_data(offset: 0, len: 160)
+    let out = ptr::alloc_bytes(160)
+    evm.mstore(addr: out, value: evm.sload(PARAMETERS_FACTORY_SLOT))
+    evm.mstore(
+        addr: at(out, 32),
+        value: evm.sload(PARAMETERS_TOKEN0_SLOT),
+    )
+    evm.mstore(
+        addr: at(out, 64),
+        value: evm.sload(PARAMETERS_TOKEN1_SLOT),
+    )
+    evm.mstore(addr: at(out, 96), value: packed & MASK_U24)
+    evm.mstore(addr: at(out, 128), value: packed >> 24)
+    evm.return_data(data: span(out, 160))
 }
 
 msg MockTimeUniswapV3PoolDeployerMsg {
@@ -108,8 +118,9 @@ pub contract MockTimeUniswapV3PoolDeployer uses (evm: mut Evm) {
             assert(pool.inner != 0)
             clear_parameters()
             emit_pool_deployed(pool)
-            evm.mstore(addr: 0, value: pool.inner)
-            evm.return_data(offset: 0, len: 32)
+            let out = ptr::alloc_bytes(32)
+            evm.mstore(addr: out, value: pool.inner)
+            evm.return_data(data: span(out, 32))
         }
     }
 }

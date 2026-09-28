@@ -1,3 +1,5 @@
+use core::ptr
+use super::mem::{at, span}
 use std::abi::sol::{self, Int24}
 use std::evm::{Evm, RawMem, RawStorage}
 use super::bit_math::{least_significant_bit, most_significant_bit}
@@ -13,10 +15,10 @@ fn position(_ tick: i256) -> (i256, u256) {
 
 #[arithmetic(unchecked)]
 pub fn word_slot(word_pos: i256, bitmap_slot: u256) -> u256 uses (evm: mut Evm) {
-    let ptr = 0
+    let ptr = ptr::alloc_bytes(64)
     evm.mstore(addr: ptr, value: int_key(word_pos))
-    evm.mstore(addr: ptr + 32, value: bitmap_slot)
-    evm.keccak256(offset: ptr, len: 64)
+    evm.mstore(addr: at(ptr, 32), value: bitmap_slot)
+    evm.keccak256(data: span(ptr, 64))
 }
 
 #[arithmetic(unchecked)]

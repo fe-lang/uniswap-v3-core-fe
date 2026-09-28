@@ -1,3 +1,5 @@
+use core::ptr
+use super::libraries::mem::{at, span}
 use std::abi::sol
 use std::evm::{Address, Ctx, Evm, RawMem, StorageMap}
 
@@ -30,11 +32,10 @@ struct TestERC20Store {
 }
 
 fn emit_transfer(from: Address, to: Address, amount: u256) uses (evm: mut Evm) {
-    let ptr = std::evm::mem::alloc(0)
+    let ptr = ptr::alloc_bytes(32)
     evm.mstore(addr: ptr, value: amount)
     evm.log3(
-        offset: ptr,
-        len: 32,
+        data: span(ptr, 32),
         topic0: TRANSFER_TOPIC,
         topic1: from.inner,
         topic2: to.inner,
@@ -44,11 +45,10 @@ fn emit_transfer(from: Address, to: Address, amount: u256) uses (evm: mut Evm) {
 fn emit_approval(owner: Address, spender: Address, amount: u256)
 uses (evm: mut Evm)
 {
-    let ptr = std::evm::mem::alloc(0)
+    let ptr = ptr::alloc_bytes(32)
     evm.mstore(addr: ptr, value: amount)
     evm.log3(
-        offset: ptr,
-        len: 32,
+        data: span(ptr, 32),
         topic0: APPROVAL_TOPIC,
         topic1: owner.inner,
         topic2: spender.inner,

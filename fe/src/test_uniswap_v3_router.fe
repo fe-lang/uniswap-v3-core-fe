@@ -1,3 +1,5 @@
+use core::ptr
+use super::libraries::mem::{at, span}
 use std::abi::sol::{self, Uint160}
 use std::evm::{Address, Ctx, Evm, Log, RawMem}
 use super::libraries::safe_cast::to_int256
@@ -61,37 +63,37 @@ fn exact_output_amount(_ amount_out: u256) -> i256 {
 fn single_pool_payload(pool: Address, payer: Address) -> Bytes
 uses (evm: mut Evm)
 {
-    let ptr = std::evm::mem::alloc(160)
+    let ptr = ptr::alloc_bytes(160)
     evm.mstore(addr: ptr, value: 128)
-    evm.mstore(addr: ptr + 32, value: 64)
-    evm.mstore(addr: ptr + 64, value: payer.inner)
-    evm.mstore(addr: ptr + 96, value: 1)
-    evm.mstore(addr: ptr + 128, value: pool.inner)
-    Bytes { data: ptr, len: 128, size: 160 }
+    evm.mstore(addr: at(ptr, 32), value: 64)
+    evm.mstore(addr: at(ptr, 64), value: payer.inner)
+    evm.mstore(addr: at(ptr, 96), value: 1)
+    evm.mstore(addr: at(ptr, 128), value: pool.inner)
+    Bytes::from_abi_tail(data: ptr, len: 128, size: 160)
 }
 
 fn empty_pools_payload(payer: Address) -> Bytes uses (evm: mut Evm) {
-    let ptr = std::evm::mem::alloc(128)
+    let ptr = ptr::alloc_bytes(128)
     evm.mstore(addr: ptr, value: 96)
-    evm.mstore(addr: ptr + 32, value: 64)
-    evm.mstore(addr: ptr + 64, value: payer.inner)
-    evm.mstore(addr: ptr + 96, value: 0)
-    Bytes { data: ptr, len: 96, size: 128 }
+    evm.mstore(addr: at(ptr, 32), value: 64)
+    evm.mstore(addr: at(ptr, 64), value: payer.inner)
+    evm.mstore(addr: at(ptr, 96), value: 0)
+    Bytes::from_abi_tail(data: ptr, len: 96, size: 128)
 }
 
 fn decode_payer(data: Bytes) -> Address uses (evm: Evm) {
     assert(data.len() >= 96)
-    as_address(evm.mload(data.data + 64))
+    as_address(data.word_at(32))
 }
 
 fn decode_pool_count(data: Bytes) -> u256 uses (evm: Evm) {
     assert(data.len() >= 96)
-    evm.mload(data.data + 96)
+    data.word_at(64)
 }
 
 fn decode_first_pool(data: Bytes) -> Address uses (evm: Evm) {
     assert(data.len() >= 128)
-    as_address(evm.mload(data.data + 128))
+    as_address(data.word_at(96))
 }
 
 fn token0(_ pool: Address) -> Address uses (evm: mut Evm) {
@@ -132,10 +134,10 @@ uses (evm: mut Evm)
 fn emit_swap_callback(amount0_delta: i256, amount1_delta: i256)
 uses (evm: mut Evm)
 {
-    let ptr = std::evm::mem::alloc(64)
+    let ptr = ptr::alloc_bytes(64)
     evm.mstore(addr: ptr, value: int_key(amount0_delta))
-    evm.mstore(addr: ptr + 32, value: int_key(amount1_delta))
-    evm.log1(offset: ptr, len: 64, topic0: SWAP_CALLBACK_TOPIC)
+    evm.mstore(addr: at(ptr, 32), value: int_key(amount1_delta))
+    evm.log1(data: span(ptr, 64), topic0: SWAP_CALLBACK_TOPIC)
 }
 
 pub contract TestUniswapV3Router uses (ctx: Ctx, evm: mut Evm) {

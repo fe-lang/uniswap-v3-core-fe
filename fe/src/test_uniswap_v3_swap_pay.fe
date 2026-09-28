@@ -1,3 +1,5 @@
+use core::ptr
+use super::libraries::mem::{at, span}
 use std::abi::sol::{self, Uint160}
 use std::evm::{Address, Ctx, Evm, RawMem}
 
@@ -50,12 +52,12 @@ fn as_address(_ value: u256) -> Address {
 fn swap_payload(sender: Address, pay0: u256, pay1: u256) -> Bytes
 uses (evm: mut Evm)
 {
-    let ptr = std::evm::mem::alloc(128)
+    let ptr = ptr::alloc_bytes(128)
     evm.mstore(addr: ptr, value: 96)
-    evm.mstore(addr: ptr + 32, value: sender.inner)
-    evm.mstore(addr: ptr + 64, value: pay0)
-    evm.mstore(addr: ptr + 96, value: pay1)
-    Bytes { data: ptr, len: 96, size: 128 }
+    evm.mstore(addr: at(ptr, 32), value: sender.inner)
+    evm.mstore(addr: at(ptr, 64), value: pay0)
+    evm.mstore(addr: at(ptr, 96), value: pay1)
+    Bytes::from_abi_tail(data: ptr, len: 96, size: 128)
 }
 
 fn token0(_ pool: Address) -> Address uses (evm: mut Evm) {
@@ -117,9 +119,9 @@ pub contract TestUniswapV3SwapPay uses (ctx: Ctx, evm: mut Evm) {
         uses (ctx, mut evm)
         {
             assert(data.len() >= 96)
-            let sender = as_address(evm.mload(data.data + 32))
-            let pay0 = evm.mload(data.data + 64)
-            let pay1 = evm.mload(data.data + 96)
+            let sender = as_address(data.word_at(0))
+            let pay0 = data.word_at(32)
+            let pay1 = data.word_at(64)
 
             if pay0 > 0 {
                 transfer_from(

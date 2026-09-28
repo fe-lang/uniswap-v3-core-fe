@@ -1,6 +1,8 @@
+use core::ptr::{self, MemSpan}
+use super::mem::{at, span}
 use std::abi::sol::{self, Int24}
 use std::evm::ops::signextend
-use std::evm::{mem, Evm, RawMem, RawOps, RawStorage}
+use std::evm::{Evm, RawMem, RawOps, RawStorage}
 use super::tick_bitmap::int_key
 use super::tick_math::{MAX_TICK, MIN_TICK}
 
@@ -311,7 +313,7 @@ uses (evm: Evm)
         }
     }
 
-    evm.revert(offset: 0, len: 0)
+    evm.revert(data: MemSpan::empty())
 }
 
 fn surrounding_observations(
@@ -393,8 +395,8 @@ fn observe_single(seconds_ago: u32) -> (i256, u256) uses (evm: Evm) {
     let target_delta = target - before_or_at.block_timestamp
     let tick_cumulative = before_or_at.tick_cumulative
         + ((at_or_after.tick_cumulative - before_or_at.tick_cumulative)
-                / (observation_time_delta as i256))
-            * (target_delta as i256)
+                / (observation_time_delta as i256)) *
+            (target_delta as i256)
     let after_seconds_per_liquidity = at_or_after.seconds_per_liquidity_cumulative_x128
     let before_seconds_per_liquidity = before_or_at.seconds_per_liquidity_cumulative_x128
     let seconds_per_liquidity_delta = (after_seconds_per_liquidity - before_seconds_per_liquidity)
@@ -414,24 +416,24 @@ fn handle_observe(return_gas: bool) -> ! uses (evm: mut Evm) {
     let gas_before = evm.gas()
     let args_offset = evm.calldataload(4)
     let len = evm.calldataload(4 + args_offset)
-    let out = mem::alloc(64 + 32 + len * 32 + 32 + len * 32)
+    let out = ptr::alloc_bytes(64 + 32 + len * 32 + 32 + len * 32)
     let first_offset: u256 = 64
     let second_offset = 64 + 32 + len * 32
     evm.mstore(addr: out, value: first_offset)
-    evm.mstore(addr: out + 32, value: second_offset)
-    evm.mstore(addr: out + first_offset, value: len)
-    evm.mstore(addr: out + second_offset, value: len)
+    evm.mstore(addr: at(out, 32), value: second_offset)
+    evm.mstore(addr: at(out, first_offset), value: len)
+    evm.mstore(addr: at(out, second_offset), value: len)
 
     let mut i: u256 = 0
     while i < len {
         let seconds_ago: u32 = evm.calldataload(4 + args_offset + 32 + i * 32).downcast_unchecked()
         let (tick_cumulative, seconds_per_liquidity_cumulative_x128) = observe_single(seconds_ago)
         evm.mstore(
-            addr: out + first_offset + 32 + i * 32,
+            addr: at(out, first_offset + 32 + i * 32),
             value: encode_int56(tick_cumulative),
         )
         evm.mstore(
-            addr: out + second_offset + 32 + i * 32,
+            addr: at(out, second_offset + 32 + i * 32),
             value: seconds_per_liquidity_cumulative_x128,
         )
         i += 1
@@ -439,10 +441,10 @@ fn handle_observe(return_gas: bool) -> ! uses (evm: mut Evm) {
 
     if return_gas {
         evm.mstore(addr: out, value: gas_before - evm.gas())
-        evm.return_data(offset: out, len: 32)
+        evm.return_data(data: span(out, 32))
     }
 
-    evm.return_data(offset: out, len: 64 + 32 + len * 32 + 32 + len * 32)
+    evm.return_data(data: span(out, 64 + 32 + len * 32 + 32 + len * 32))
 }
 
 msg OracleTestMsg {
@@ -547,7 +549,7 @@ pub contract OracleTest uses (evm: mut Evm) {
                 handle_observe(return_gas: true)
             }
 
-            evm.revert(offset: 0, len: 0)
+            evm.revert(data: MemSpan::empty())
         }
     }
 }

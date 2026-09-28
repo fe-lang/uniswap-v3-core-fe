@@ -1,29 +1,31 @@
-use std::evm::{Address, Call, Evm, RawMem, RawOps}
+use core::ptr::{self, MemBuffer}
+use super::mem::{at, span}
+use std::evm::{Address, Call, Evm, RawMem}
 
 const TRANSFER_SELECTOR: u256 = 0xa9059cbb
 
 pub fn safe_transfer(token: Address, to: Address, value: u256)
 uses (call: mut Call, evm: mut Evm)
 {
-    let ptr = std::evm::mem::alloc(68)
+    let ptr = ptr::alloc_bytes(68)
     evm.mstore(addr: ptr, value: TRANSFER_SELECTOR << 224)
-    evm.mstore(addr: ptr + 4, value: to.inner)
-    evm.mstore(addr: ptr + 36, value: value)
+    evm.mstore(addr: at(ptr, 4), value: to.inner)
+    evm.mstore(addr: at(ptr, 36), value: value)
 
-    let success = call
+    let mut ret = MemBuffer::with_capacity(32)
+    let outcome = call
         .raw_call(
             addr: token,
             gas: evm.gas(),
             value: 0,
-            args_offset: ptr,
-            args_len: 68,
+            args: span(ptr, 68),
+            ret: mut ret,
         )
-    let ret_len = evm.returndatasize()
+    let ret_len = outcome.returndata_len()
     let mut returned_true = false
     if ret_len >= 32 {
-        evm.returndatacopy(dest: ptr, offset: 0, len: 32)
-        returned_true = evm.mload(ptr) != 0
+        returned_true = evm.mload(ret.ptr()) != 0
     }
 
-    assert!(success && (ret_len == 0 || returned_true), "TF")
+    assert!(outcome.success() && (ret_len == 0 || returned_true), "TF")
 }

@@ -1,3 +1,5 @@
+use core::ptr
+use super::mem::{at, span}
 use std::evm::{Evm, RawMem, RawOps}
 
 const ERROR_STRING_SELECTOR_WORD: u256 = 0x08c379a000000000000000000000000000000000000000000000000000000000
@@ -9,10 +11,11 @@ pub const MSG_NP: u256 = 0x4e500000000000000000000000000000000000000000000000000
 
 pub fn require_short(_ evm: mut Evm, condition: bool, code: u256, len: u256) {
     if !condition {
-        evm.mstore(addr: 0, value: ERROR_STRING_SELECTOR_WORD)
-        evm.mstore(addr: 4, value: 32)
-        evm.mstore(addr: 36, value: len)
-        evm.mstore(addr: 68, value: code)
-        evm.revert(offset: 0, len: 100)
+        let ptr = ptr::alloc_bytes(100)
+        evm.mstore(addr: ptr, value: ERROR_STRING_SELECTOR_WORD)
+        evm.mstore(addr: at(ptr, 4), value: 32)
+        evm.mstore(addr: at(ptr, 36), value: len)
+        evm.mstore(addr: at(ptr, 68), value: code)
+        evm.revert(data: span(ptr, 100))
     }
 }

@@ -4,6 +4,7 @@ pub use fixed_point_96::{self}
 pub use full_math::{self}
 pub use liquidity_math::{self}
 pub use low_gas_safe_math::{self}
+pub use mem::{self}
 pub use no_delegate_call::{self}
 pub use oracle::{self}
 pub use pool_slot0::{self}

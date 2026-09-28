@@ -1,3 +1,5 @@
+use core::ptr
+use super::libraries::mem::{at, span}
 use std::abi::sol::{self, Int24, Uint160}
 use std::evm::{Address, Ctx, Evm, Log, RawMem}
 use super::libraries::tick_bitmap::int_key
@@ -112,26 +114,26 @@ fn as_address(_ value: u256) -> Address {
 }
 
 fn address_payload(_ sender: Address) -> Bytes uses (evm: mut Evm) {
-    let ptr = std::evm::mem::alloc(64)
+    let ptr = ptr::alloc_bytes(64)
     evm.mstore(addr: ptr, value: 32)
-    evm.mstore(addr: ptr + 32, value: sender.inner)
-    Bytes { data: ptr, len: 32, size: 64 }
+    evm.mstore(addr: at(ptr, 32), value: sender.inner)
+    Bytes::from_abi_tail(data: ptr, len: 32, size: 64)
 }
 
 fn flash_payload(sender: Address, pay0: u256, pay1: u256) -> Bytes
 uses (evm: mut Evm)
 {
-    let ptr = std::evm::mem::alloc(128)
+    let ptr = ptr::alloc_bytes(128)
     evm.mstore(addr: ptr, value: 96)
-    evm.mstore(addr: ptr + 32, value: sender.inner)
-    evm.mstore(addr: ptr + 64, value: pay0)
-    evm.mstore(addr: ptr + 96, value: pay1)
-    Bytes { data: ptr, len: 96, size: 128 }
+    evm.mstore(addr: at(ptr, 32), value: sender.inner)
+    evm.mstore(addr: at(ptr, 64), value: pay0)
+    evm.mstore(addr: at(ptr, 96), value: pay1)
+    Bytes::from_abi_tail(data: ptr, len: 96, size: 128)
 }
 
 fn decode_sender(_ data: Bytes) -> Address uses (evm: Evm) {
     assert(data.len() >= 32)
-    as_address(evm.mload(data.data + 32))
+    as_address(data.word_at(0))
 }
 
 fn token0(_ pool: Address) -> Address uses (evm: mut Evm) {
@@ -172,26 +174,26 @@ uses (evm: mut Evm)
 fn emit_swap_callback(amount0_delta: i256, amount1_delta: i256)
 uses (evm: mut Evm)
 {
-    let ptr = std::evm::mem::alloc(64)
+    let ptr = ptr::alloc_bytes(64)
     evm.mstore(addr: ptr, value: int_key(amount0_delta))
-    evm.mstore(addr: ptr + 32, value: int_key(amount1_delta))
-    evm.log1(offset: ptr, len: 64, topic0: SWAP_CALLBACK_TOPIC)
+    evm.mstore(addr: at(ptr, 32), value: int_key(amount1_delta))
+    evm.log1(data: span(ptr, 64), topic0: SWAP_CALLBACK_TOPIC)
 }
 
 fn emit_mint_callback(amount0_owed: u256, amount1_owed: u256)
 uses (evm: mut Evm)
 {
-    let ptr = std::evm::mem::alloc(64)
+    let ptr = ptr::alloc_bytes(64)
     evm.mstore(addr: ptr, value: amount0_owed)
-    evm.mstore(addr: ptr + 32, value: amount1_owed)
-    evm.log1(offset: ptr, len: 64, topic0: MINT_CALLBACK_TOPIC)
+    evm.mstore(addr: at(ptr, 32), value: amount1_owed)
+    evm.log1(data: span(ptr, 64), topic0: MINT_CALLBACK_TOPIC)
 }
 
 fn emit_flash_callback(fee0: u256, fee1: u256) uses (evm: mut Evm) {
-    let ptr = std::evm::mem::alloc(64)
+    let ptr = ptr::alloc_bytes(64)
     evm.mstore(addr: ptr, value: fee0)
-    evm.mstore(addr: ptr + 32, value: fee1)
-    evm.log1(offset: ptr, len: 64, topic0: FLASH_CALLBACK_TOPIC)
+    evm.mstore(addr: at(ptr, 32), value: fee1)
+    evm.log1(data: span(ptr, 64), topic0: FLASH_CALLBACK_TOPIC)
 }
 
 pub contract TestUniswapV3Callee uses (ctx: Ctx, evm: mut Evm) {
@@ -389,9 +391,9 @@ pub contract TestUniswapV3Callee uses (ctx: Ctx, evm: mut Evm) {
         uses (ctx, mut evm)
         {
             assert(data.len() >= 96)
-            let sender = as_address(evm.mload(data.data + 32))
-            let pay0 = evm.mload(data.data + 64)
-            let pay1 = evm.mload(data.data + 96)
+            let sender = as_address(data.word_at(0))
+            let pay0 = data.word_at(32)
+            let pay1 = data.word_at(64)
             emit_flash_callback(fee0, fee1)
             if pay0 > 0 {
                 transfer_from(
