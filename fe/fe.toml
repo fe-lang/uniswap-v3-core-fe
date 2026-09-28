@@ -3,5 +3,3 @@ name = "uniswap_v3_core_fe"
 version = "0.1.0"
 arithmetic = "unchecked"
 
-[dependencies]
-std = { path = "../../fe/debug/ingots/std" }
