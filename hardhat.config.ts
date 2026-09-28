@@ -7,8 +7,9 @@ export default {
   networks: {
     hardhat: {
       // Fe artifacts target Sonatina's evm-ethereum-osaka; the Solidity gas
-      // snapshots were recorded under Berlin.
-      hardfork: process.env.FE_ARTIFACTS === '1' ? 'osaka' : 'berlin',
+      // snapshots were recorded under Berlin. Set HARDHAT_HARDFORK to compare
+      // both under one fork.
+      hardfork: process.env.HARDHAT_HARDFORK ?? (process.env.FE_ARTIFACTS === '1' ? 'osaka' : 'berlin'),
       allowUnlimitedContractSize: process.env.FE_ARTIFACTS === '1',
       blockGasLimit: process.env.FE_ARTIFACTS === '1' ? 0x1fffffffffffff : undefined,
       gas: process.env.FE_ARTIFACTS === '1' ? 30000000 : undefined,
