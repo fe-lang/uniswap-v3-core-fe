@@ -12,7 +12,6 @@ const PARAMETERS_PACKED_SLOT: u256 = 3
 const OWNER_SLOT: u256 = 4
 const FEE_AMOUNT_TICK_SPACING_SLOT: u256 = 5
 const GET_POOL_SLOT: u256 = 6
-const ORIGINAL_SLOT: u256 = 7
 
 const MASK_U24: u256 = 0xffffff
 const MASK_U160: u256 = 0xffffffffffffffffffffffffffffffffffffffff
@@ -126,8 +125,8 @@ uses (evm: mut Evm)
     evm.keccak256(data: span(ptr, 96))
 }
 
-fn check_not_delegate_call() uses (ctx: Ctx, evm: Evm) {
-    assert(ctx.address().inner == evm.sload(ORIGINAL_SLOT))
+fn check_not_delegate_call(_ original: Address) uses (ctx: Ctx) {
+    assert(ctx.address() == original)
 }
 
 fn emit_owner_changed(old_owner: Address, new_owner: Address)
@@ -197,12 +196,14 @@ msg UniswapV3FactoryMsg {
 }
 
 pub contract UniswapV3Factory uses (ctx: Ctx, evm: mut Evm) {
+    original: Address,
+
     init()
-    uses (ctx, mut evm)
+    uses (ctx, mut evm, mut original)
     {
+        original = ctx.address()
         let owner = ctx.caller()
         store_address(slot: OWNER_SLOT, value: owner)
-        evm.sstore(slot: ORIGINAL_SLOT, value: ctx.address().inner)
         emit_owner_changed(old_owner: Address::zero(), new_owner: owner)
         set_fee_amount_tick_spacing(fee: Uint24 { val: 500 }, tick_spacing: Int24 { val: 10 })
         emit_fee_amount_enabled(fee: Uint24 { val: 500 }, tick_spacing: Int24 { val: 10 })
@@ -244,9 +245,9 @@ pub contract UniswapV3Factory uses (ctx: Ctx, evm: mut Evm) {
         }
 
         CreatePool { tokenA, tokenB, fee } -> u256
-        uses (ctx, mut evm)
+        uses (ctx, mut evm, original)
         {
-            check_not_delegate_call()
+            check_not_delegate_call(original)
             assert(tokenA != tokenB)
             let (token0, token1) = if tokenA.inner < tokenB.inner {
                 (tokenA, tokenB)

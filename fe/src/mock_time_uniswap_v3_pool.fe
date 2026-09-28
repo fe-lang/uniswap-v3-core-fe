@@ -151,10 +151,6 @@ msg MockTimeUniswapV3PoolMsg {
 }
 
 struct MockTimePoolStore {
-    factory: Address,
-    token0: Address,
-    token1: Address,
-    pool_config: u256,
     slot0: PackedSlot0,
     observation0_block_timestamp: u32,
     observation0_tick_cumulative: i64,
@@ -424,17 +420,20 @@ uses (evm: mut Evm)
 
 #[arithmetic(unchecked)]
 #[inline(never)]
-fn modify_position(owner: Address, tick_lower: i256, tick_upper: i256, liquidity_delta: i128) -> (
-    u256,
-    u256,
-)
+fn modify_position(
+    owner: Address,
+    tick_lower: i256,
+    tick_upper: i256,
+    liquidity_delta: i128,
+    pool_config: u256,
+) -> (u256, u256)
 uses (evm: mut Evm, store: mut MockTimePoolStore)
 {
     check_ticks(mut evm, tick_lower, tick_upper: tick_upper)
 
     let slot0 = store.slot0
     let tick_current_i = slot0.tick() as i256
-    let pool_config = store.pool_config
+    let pool_config = pool_config
     let tick_spacing = config_tick_spacing(pool_config) as i256
     let max_liquidity = config_max_liquidity(pool_config)
 
@@ -1061,18 +1060,26 @@ uses (evm: mut Evm)
 }
 
 pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
+    factory: Address,
+    token0: Address,
+    token1: Address,
+    pool_config: u256,
     mut store: MockTimePoolStore,
 
     init()
-    uses (ctx, mut call, mut evm, mut store)
+    uses (ctx, mut call, mut evm, mut store, mut factory, mut token0, mut token1, mut pool_config)
     {
-        let (factory, token0, token1, fee, tick_spacing) = load_deployer_parameters(
-            deployer: ctx.caller(),
-        )
-        store.factory = factory
-        store.token0 = token0
-        store.token1 = token1
-        store.pool_config = pack_config(
+        let (
+            deployer_factory,
+            deployer_token0,
+            deployer_token1,
+            fee,
+            tick_spacing,
+        ) = load_deployer_parameters(deployer: ctx.caller())
+        factory = deployer_factory
+        token0 = deployer_token0
+        token1 = deployer_token1
+        pool_config = pack_config(
             fee,
             tick_spacing,
             max_liquidity: tick_spacing_to_max_liquidity_per_tick(tick_spacing as i256),
@@ -1081,30 +1088,28 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
     }
 
     recv MockTimeUniswapV3PoolMsg {
-        Factory uses (store, mut evm) {
-            return_word(value: store.factory.inner)
+        Factory uses (mut evm, factory) {
+            return_word(value: factory.inner)
         }
 
-        Token0 uses (store, mut evm) {
-            return_word(value: store.token0.inner)
+        Token0 uses (mut evm, token0) {
+            return_word(value: token0.inner)
         }
 
-        Token1 uses (store, mut evm) {
-            return_word(value: store.token1.inner)
+        Token1 uses (mut evm, token1) {
+            return_word(value: token1.inner)
         }
 
-        Fee uses (store, mut evm) {
-            return_word(value: config_fee(store.pool_config) as u256)
+        Fee uses (mut evm, pool_config) {
+            return_word(value: config_fee(pool_config) as u256)
         }
 
-        TickSpacing uses (store, mut evm) {
-            return_word(
-                value: int_key(config_tick_spacing(store.pool_config) as i256),
-            )
+        TickSpacing uses (mut evm, pool_config) {
+            return_word(value: int_key(config_tick_spacing(pool_config) as i256))
         }
 
-        MaxLiquidityPerTick uses (store, mut evm) {
-            return_word(value: config_max_liquidity(store.pool_config) as u256)
+        MaxLiquidityPerTick uses (mut evm, pool_config) {
+            return_word(value: config_max_liquidity(pool_config) as u256)
         }
 
         Slot0 uses (store, mut evm) {
@@ -1297,7 +1302,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             )
         }
 
-        SetFeeProtocol uses (ctx, mut call, mut evm, mut store) {
+        SetFeeProtocol uses (ctx, mut call, mut evm, mut store, factory) {
             let slot0 = store.slot0
             check_unlocked(mut evm, slot0.unlocked())
             store.slot0 = slot0.lock()
@@ -1308,9 +1313,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             assert(fee1_word <= 255)
             let feeProtocol0: u8 = fee0_word.downcast_unchecked()
             let feeProtocol1: u8 = fee1_word.downcast_unchecked()
-            assert(
-                ctx.caller().inner == factory_owner(factory: store.factory),
-            )
+            assert(ctx.caller().inner == factory_owner(factory: factory))
             let fee_mask = ((1 as u256) << (feeProtocol0 as u256))
                 | ((1 as u256) << (feeProtocol1 as u256))
             assert((fee_mask & 0x7f1) == fee_mask)
@@ -1328,13 +1331,11 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             store.slot0 = store.slot0.unlock()
         }
 
-        CollectProtocol uses (ctx, mut call, mut evm, mut store) {
+        CollectProtocol uses (ctx, mut call, mut evm, mut store, factory, token0, token1) {
             let slot0 = store.slot0
             check_unlocked(mut evm, slot0.unlocked())
             store.slot0 = slot0.lock()
-            assert(
-                ctx.caller().inner == factory_owner(factory: store.factory),
-            )
+            assert(ctx.caller().inner == factory_owner(factory: factory))
 
             let recipient = Address { inner: evm.calldataload(4) }
             let amount0_requested = decode_u128_word(evm.calldataload(36))
@@ -1347,14 +1348,14 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                     amount0 -= 1
                 }
                 store.protocol_fee0 -= amount0
-                compact_transfer(token: store.token0, to: recipient, value: amount0 as u256)
+                compact_transfer(token: token0, to: recipient, value: amount0 as u256)
             }
             if amount1 > 0 {
                 if amount1 == store.protocol_fee1 {
                     amount1 -= 1
                 }
                 store.protocol_fee1 -= amount1
-                compact_transfer(token: store.token1, to: recipient, value: amount1 as u256)
+                compact_transfer(token: token1, to: recipient, value: amount1 as u256)
             }
 
             let out = ptr::alloc_bytes(64)
@@ -1370,7 +1371,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             return_pair(amount0: amount0 as u256, amount1: amount1 as u256)
         }
 
-        Flash uses (ctx, mut call, mut evm, mut store) {
+        Flash uses (ctx, mut call, mut evm, mut store, token0, token1, pool_config) {
             let slot0 = store.slot0
             check_unlocked(mut evm, slot0.unlocked())
             store.slot0 = slot0.lock()
@@ -1386,20 +1387,20 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             let amount1 = evm.calldataload(68)
             let data_offset = evm.calldataload(100)
             let data_start = 4 + data_offset
-            let fee = config_fee(store.pool_config) as u256
+            let fee = config_fee(pool_config) as u256
             let fee0 = ((amount0 * fee) + 999999) / 1000000
             let fee1 = ((amount1 * fee) + 999999) / 1000000
-            let balance0_before = balance_of(token: store.token0, account: ctx.address())
-            let balance1_before = balance_of(token: store.token1, account: ctx.address())
+            let balance0_before = balance_of(token: token0, account: ctx.address())
+            let balance1_before = balance_of(token: token1, account: ctx.address())
             if amount0 > 0 {
-                compact_transfer(token: store.token0, to: recipient, value: amount0)
+                compact_transfer(token: token0, to: recipient, value: amount0)
             }
             if amount1 > 0 {
-                compact_transfer(token: store.token1, to: recipient, value: amount1)
+                compact_transfer(token: token1, to: recipient, value: amount1)
             }
             flash_callback(caller: ctx.caller(), fee0, fee1, data_start)
-            let balance0_after = balance_of(token: store.token0, account: ctx.address())
-            let balance1_after = balance_of(token: store.token1, account: ctx.address())
+            let balance0_after = balance_of(token: token0, account: ctx.address())
+            let balance1_after = balance_of(token: token1, account: ctx.address())
             assert(balance0_before + fee0 <= balance0_after)
             assert(balance1_before + fee1 <= balance1_after)
             let paid0 = sub_u256(a: balance0_after, b: balance0_before)
@@ -1441,7 +1442,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             store.slot0 = slot0
         }
 
-        Swap uses (ctx, mut call, mut evm, mut store) {
+        Swap uses (ctx, mut call, mut evm, mut store, token0, token1, pool_config) {
             let slot0_start = store.slot0
             check_unlocked(mut evm, slot0_start.unlocked())
             let recipient = Address { inner: evm.calldataload(4) }
@@ -1470,20 +1471,12 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             )
             let mut slot0_next = slot0_start.lock()
             store.slot0 = slot0_next
-            let input_token = if zero_for_one {
-                store.token0
-            } else {
-                store.token1
-            }
-            let output_token = if zero_for_one {
-                store.token1
-            } else {
-                store.token0
-            }
+            let input_token = if zero_for_one { token0 } else { token1 }
+            let output_token = if zero_for_one { token1 } else { token0 }
             let sqrt_price_start_x96 = slot0_start.sqrt_price_x96()
             let tick_start = slot0_start.tick()
             let current_time: u32 = store.time.downcast_unchecked()
-            let pool_config = store.pool_config
+            let pool_config = pool_config
             let fee_pips = config_fee(pool_config) as u256
             let tick_spacing = config_tick_spacing(pool_config) as i256
             let mut tick_cumulative: i256 = 0
@@ -1790,7 +1783,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             )
         }
 
-        Mint uses (ctx, mut call, mut evm, mut store) {
+        Mint uses (ctx, mut call, mut evm, mut store, token0, token1, pool_config) {
             let slot0 = store.slot0
             check_unlocked(mut evm, slot0.unlocked())
             store.slot0 = slot0.lock()
@@ -1807,15 +1800,16 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 tick_lower: tick_lower as i256,
                 tick_upper: tick_upper as i256,
                 liquidity_delta,
+                pool_config,
             )
 
             let balance0_before = if amount0 > 0 {
-                balance_of(token: store.token0, account: ctx.address())
+                balance_of(token: token0, account: ctx.address())
             } else {
                 0
             }
             let balance1_before = if amount1 > 0 {
-                balance_of(token: store.token1, account: ctx.address())
+                balance_of(token: token1, account: ctx.address())
             } else {
                 0
             }
@@ -1823,7 +1817,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             mint_callback_calldata(caller: ctx.caller(), amount0, amount1, data_start)
 
             if amount0 > 0 {
-                let balance0_after: u256 = balance_of(token: store.token0, account: ctx.address())
+                let balance0_after: u256 = balance_of(token: token0, account: ctx.address())
                 require_msg(
                     mut evm,
                     condition: balance0_before + amount0 <= balance0_after,
@@ -1832,7 +1826,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 )
             }
             if amount1 > 0 {
-                let balance1_after: u256 = balance_of(token: store.token1, account: ctx.address())
+                let balance1_after: u256 = balance_of(token: token1, account: ctx.address())
                 require_msg(
                     mut evm,
                     condition: balance1_before + amount1 <= balance1_after,
@@ -1854,7 +1848,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             return_pair(amount0, amount1)
         }
 
-        Burn uses (ctx, mut call, mut evm, mut store) {
+        Burn uses (ctx, mut call, mut evm, mut store, pool_config) {
             let slot0 = store.slot0
             check_unlocked(mut evm, slot0.unlocked())
             store.slot0 = slot0.lock()
@@ -1868,6 +1862,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 tick_lower: tick_lower as i256,
                 tick_upper: tick_upper as i256,
                 liquidity_delta,
+                pool_config,
             )
 
             store.slot0 = store.slot0.unlock()
@@ -1882,7 +1877,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             return_pair(amount0, amount1)
         }
 
-        Collect uses (ctx, mut evm, mut store) {
+        Collect uses (ctx, mut evm, mut store, token0, token1) {
             let slot0 = store.slot0
             check_unlocked(mut evm, slot0.unlocked())
             store.slot0 = slot0.lock()
@@ -1910,10 +1905,10 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 )
             }
             if amount0 > 0 {
-                compact_transfer(token: store.token0, to: recipient, value: amount0 as u256)
+                compact_transfer(token: token0, to: recipient, value: amount0 as u256)
             }
             if amount1 > 0 {
-                compact_transfer(token: store.token1, to: recipient, value: amount1 as u256)
+                compact_transfer(token: token1, to: recipient, value: amount1 as u256)
             }
             store.slot0 = store.slot0.unlock()
             let log_data = ptr::alloc_bytes(96)
