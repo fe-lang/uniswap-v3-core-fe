@@ -1,3 +1,4 @@
+use core::hint::black_box
 use std::abi::sol
 use std::evm::{Ctx, Evm}
 use super::revert_reason::{require_short, MSG_LA, MSG_LS}
@@ -42,7 +43,7 @@ pub contract LiquidityMathTest uses (evm: mut Evm) {
 
         GetGasCostOfAddDelta { x, y } -> u256 uses (mut evm) {
             let gas_before = evm.gas()
-            add_delta(x, y)
+            black_box(add_delta(black_box(x), black_box(y)))
             gas_before - evm.gas()
         }
     }

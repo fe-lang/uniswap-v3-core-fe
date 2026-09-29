@@ -1,3 +1,4 @@
+use core::hint::black_box
 use std::abi::sol::{self, Uint24, Uint160}
 use std::evm::Evm
 use super::full_math::{mul_div, mul_div_rounding_up}
@@ -217,13 +218,17 @@ pub contract SwapMathTest uses (evm: Evm) {
         uses (evm)
         {
             let gas_before = evm.gas()
-            compute_swap_step(
-                sqrt_ratio_current_x96: sqrtP,
-                sqrt_ratio_target_x96: sqrtPTarget,
-                liquidity,
-                amount_remaining: amountRemaining,
-                fee_pips: feePips,
+            let (sqrt_ratio_next_x96, amount_in, amount_out, fee_amount) = compute_swap_step(
+                sqrt_ratio_current_x96: black_box(sqrtP),
+                sqrt_ratio_target_x96: black_box(sqrtPTarget),
+                black_box(liquidity),
+                amount_remaining: black_box(amountRemaining),
+                fee_pips: black_box(feePips),
             )
+            black_box(sqrt_ratio_next_x96)
+            black_box(amount_in)
+            black_box(amount_out)
+            black_box(fee_amount)
             gas_before - evm.gas()
         }
     }

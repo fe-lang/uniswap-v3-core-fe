@@ -1,3 +1,4 @@
+use core::hint::black_box
 use std::abi::sol::{self, Uint160}
 use std::evm::crypto::mulmod
 use std::evm::Evm
@@ -356,11 +357,13 @@ pub contract SqrtPriceMathTest uses (evm: Evm) {
         uses (evm)
         {
             let gas_before = evm.gas()
-            get_next_sqrt_price_from_input(
-                sqrt_p_x96: sqrtP,
-                liquidity,
-                amount_in: amountIn,
-                zero_for_one: zeroForOne,
+            black_box(
+                get_next_sqrt_price_from_input(
+                    sqrt_p_x96: black_box(sqrtP),
+                    black_box(liquidity),
+                    amount_in: black_box(amountIn),
+                    zero_for_one: black_box(zeroForOne),
+                ),
             )
             gas_before - evm.gas()
         }
@@ -378,11 +381,13 @@ pub contract SqrtPriceMathTest uses (evm: Evm) {
         uses (evm)
         {
             let gas_before = evm.gas()
-            get_next_sqrt_price_from_output(
-                sqrt_p_x96: sqrtP,
-                liquidity,
-                amount_out: amountOut,
-                zero_for_one: zeroForOne,
+            black_box(
+                get_next_sqrt_price_from_output(
+                    sqrt_p_x96: black_box(sqrtP),
+                    black_box(liquidity),
+                    amount_out: black_box(amountOut),
+                    zero_for_one: black_box(zeroForOne),
+                ),
             )
             gas_before - evm.gas()
         }
@@ -409,11 +414,13 @@ pub contract SqrtPriceMathTest uses (evm: Evm) {
         uses (evm)
         {
             let gas_before = evm.gas()
-            get_amount0_delta(
-                sqrt_ratio_a_x96: sqrtLower,
-                sqrt_ratio_b_x96: sqrtUpper,
-                liquidity,
-                round_up: roundUp,
+            black_box(
+                get_amount0_delta(
+                    sqrt_ratio_a_x96: black_box(sqrtLower),
+                    sqrt_ratio_b_x96: black_box(sqrtUpper),
+                    black_box(liquidity),
+                    round_up: black_box(roundUp),
+                ),
             )
             gas_before - evm.gas()
         }
@@ -422,11 +429,13 @@ pub contract SqrtPriceMathTest uses (evm: Evm) {
         uses (evm)
         {
             let gas_before = evm.gas()
-            get_amount1_delta(
-                sqrt_ratio_a_x96: sqrtLower,
-                sqrt_ratio_b_x96: sqrtUpper,
-                liquidity,
-                round_up: roundUp,
+            black_box(
+                get_amount1_delta(
+                    sqrt_ratio_a_x96: black_box(sqrtLower),
+                    sqrt_ratio_b_x96: black_box(sqrtUpper),
+                    black_box(liquidity),
+                    round_up: black_box(roundUp),
+                ),
             )
             gas_before - evm.gas()
         }

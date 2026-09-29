@@ -1,3 +1,4 @@
+use core::hint::black_box
 use std::abi::sol::{self, Int24, Uint160}
 use std::evm::Evm
 
@@ -272,7 +273,7 @@ pub contract TickMathTest uses (evm: Evm) {
         uses (evm)
         {
             let gas_before = evm.gas()
-            get_sqrt_ratio_at_tick(tick)
+            black_box(get_sqrt_ratio_at_tick(tick: black_box(tick)))
             gas_before - evm.gas()
         }
 
@@ -284,7 +285,9 @@ pub contract TickMathTest uses (evm: Evm) {
         uses (evm)
         {
             let gas_before = evm.gas()
-            get_tick_at_sqrt_ratio(sqrt_price_x96: sqrtPriceX96)
+            black_box(
+                get_tick_at_sqrt_ratio(sqrt_price_x96: black_box(sqrtPriceX96)),
+            )
             gas_before - evm.gas()
         }
 

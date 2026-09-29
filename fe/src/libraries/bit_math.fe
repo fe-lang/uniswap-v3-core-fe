@@ -1,3 +1,4 @@
+use core::hint::black_box
 use std::abi::sol
 use std::evm::{Ctx, Evm}
 
@@ -133,7 +134,7 @@ pub contract BitMathTest uses (evm: Evm) {
         uses (evm)
         {
             let gas_before = evm.gas()
-            most_significant_bit(x)
+            black_box(most_significant_bit(black_box(x)))
             gas_before - evm.gas()
         }
 
@@ -145,7 +146,7 @@ pub contract BitMathTest uses (evm: Evm) {
         uses (evm)
         {
             let gas_before = evm.gas()
-            least_significant_bit(x)
+            black_box(least_significant_bit(black_box(x)))
             gas_before - evm.gas()
         }
     }

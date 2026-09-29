@@ -1,3 +1,4 @@
+use core::hint::black_box
 use std::evm::{Address, Ctx, Evm}
 
 fn check_not_delegate_call(_ original: Address) uses (ctx: Ctx) {
@@ -50,7 +51,7 @@ pub contract NoDelegateCallTest uses (ctx: Ctx, evm: mut Evm) {
 
         GetGasCostOfCanBeDelegateCalled -> u256 uses (ctx, evm) {
             let gas_before = evm.gas()
-            can_be_delegate_called()
+            black_box(can_be_delegate_called())
             gas_before - evm.gas()
         }
 
@@ -58,7 +59,7 @@ pub contract NoDelegateCallTest uses (ctx: Ctx, evm: mut Evm) {
         uses (ctx, evm, original)
         {
             let gas_before = evm.gas()
-            cannot_be_delegate_called(original)
+            black_box(cannot_be_delegate_called(original))
             gas_before - evm.gas()
         }
 
