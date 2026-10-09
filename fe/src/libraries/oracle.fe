@@ -1,3 +1,4 @@
+use core::ptr::MemBuffer
 use std::evm::encode_abi_payload
 use std::evm::packed::Packed
 use std::abi::sol::{self, Int24}
@@ -7,24 +8,20 @@ use super::tick_bitmap::int_key
 use super::tick_math::{MAX_TICK, MIN_TICK}
 
 const OBSERVATION_COUNT: u256 = 65535
+pub type Observations = [u256; 65535]
 // The native word array and following full words retain slots 0..65537.
-struct OracleStore {
-    observations: [u256; 65535],
-    state: u256,
-    initialized: u256,
-    time_passed: u256,
-}
+struct OracleStore { observations: Observations, state: u256, initialized: u256, time_passed: u256 }
 
 const MAX_U16: u256 = 0xffff
 const MAX_U32: u256 = 0xffffffff
 const MAX_U128: u256 = 0xffffffffffffffffffffffffffffffff
 const MAX_U160: u256 = 0xffffffffffffffffffffffffffffffffffffffff
 
-struct Observation {
-    block_timestamp: u32,
-    tick_cumulative: i256,
-    seconds_per_liquidity_cumulative_x128: u256,
-    initialized: bool,
+pub struct Observation {
+    pub block_timestamp: u32,
+    pub tick_cumulative: i256,
+    pub seconds_per_liquidity_cumulative_x128: u256,
+    pub initialized: bool,
 }
 
 fn signed_word(_ value: i256, bits: u256) -> u256 {
@@ -44,8 +41,8 @@ fn observation_slot(_ index: u256) -> u256 {
     index
 }
 
-fn read_observation(_ index: u256) -> Observation uses (store: OracleStore) {
-    let word = store.observations[observation_slot(index) as usize]
+pub fn read_observation(_ index: u256, observations: ref Observations) -> Observation {
+    let word = observations[observation_slot(index) as usize]
     Observation {
         block_timestamp: (word & MAX_U32).downcast_unchecked(),
         tick_cumulative: decode_i56_word(word >> 32),
@@ -60,16 +57,15 @@ fn write_observation(
     tick_cumulative: i256,
     seconds_per_liquidity_cumulative_x128: u256,
     initialized: bool,
-)
-uses (store: mut OracleStore)
-{
+    observations: mut Observations,
+) {
     assert(seconds_per_liquidity_cumulative_x128 <= MAX_U160)
     let initialized_word = if initialized { 1 } else { 0 }
     let word = (block_timestamp as u256)
         | (signed_word(tick_cumulative, bits: 56) << 32)
         | (seconds_per_liquidity_cumulative_x128 << 88)
         | (initialized_word << 248)
-    store.observations[observation_slot(index) as usize] = word
+    observations[observation_slot(index) as usize] = word
 }
 
 fn state_word() -> u256 uses (store: OracleStore) {
@@ -148,7 +144,7 @@ fn transform(last: Observation, block_timestamp: u32, tick: i256, liquidity: u12
     let denominator = if liquidity > 0 { liquidity as u256 } else { 1 }
     Observation {
         block_timestamp,
-        tick_cumulative: last.tick_cumulative + tick * (delta as i256),
+        tick_cumulative: decode_i56_word(int_key(last.tick_cumulative + tick * (delta as i256))),
         seconds_per_liquidity_cumulative_x128: (last.seconds_per_liquidity_cumulative_x128
                 + (((delta as u256) << 128) / denominator))
             & MAX_U160,
@@ -156,17 +152,22 @@ fn transform(last: Observation, block_timestamp: u32, tick: i256, liquidity: u12
     }
 }
 
-pub fn initialize(time: u32, tick: i256, liquidity: u128)
-uses (store: mut OracleStore)
-{
-    assert!(state_cardinality() == 0, "already initialized")
+pub fn initialize_observations(time: u32, observations: mut Observations) {
     write_observation(
         index: 0,
         block_timestamp: time,
         tick_cumulative: 0,
         seconds_per_liquidity_cumulative_x128: 0,
         initialized: true,
+        observations: mut observations,
     )
+}
+
+pub fn initialize(time: u32, tick: i256, liquidity: u128)
+uses (store: mut OracleStore)
+{
+    assert!(state_cardinality() == 0, "already initialized")
+    initialize_observations(time, observations: mut store.observations)
     write_state(
         time,
         tick,
@@ -190,17 +191,16 @@ pub fn advance_time(_ by: u32) uses (store: mut OracleStore) {
 }
 
 #[arithmetic(unchecked)]
-fn write(
+pub fn write(
     index: u16,
     block_timestamp: u32,
     tick: i256,
     liquidity: u128,
     cardinality: u16,
     cardinality_next: u16,
-) -> (u16, u16)
-uses (store: mut OracleStore)
-{
-    let last = read_observation(index as u256)
+    observations: mut Observations,
+) -> (u16, u16) {
+    let last = read_observation(index as u256, observations: ref observations)
     if last.block_timestamp == block_timestamp {
         return (index, cardinality)
     }
@@ -218,6 +218,7 @@ uses (store: mut OracleStore)
         tick_cumulative: next.tick_cumulative,
         seconds_per_liquidity_cumulative_x128: next.seconds_per_liquidity_cumulative_x128,
         initialized: next.initialized,
+        observations: mut observations,
     )
 
     (index_updated, cardinality_updated)
@@ -235,6 +236,7 @@ uses (store: mut OracleStore)
         liquidity: state_liquidity(),
         cardinality: state_cardinality(),
         cardinality_next: state_cardinality_next(),
+        observations: mut store.observations,
     )
     write_state(
         time,
@@ -246,25 +248,25 @@ uses (store: mut OracleStore)
     )
 }
 
-pub fn grow(_ next: u16) -> u16 uses (store: mut OracleStore) {
-    let current = state_cardinality_next()
+pub fn grow(current: u16, next: u16, observations: mut Observations) -> u16 {
     assert!(current > 0, "I")
     if next <= current {
         return current
     }
-
     let mut i = current
     while i < next {
-        write_observation(
-            index: i as u256,
-            block_timestamp: 1,
-            tick_cumulative: 0,
-            seconds_per_liquidity_cumulative_x128: 0,
-            initialized: false,
-        )
+        observations[i as usize] = (observations[i as usize] & !MAX_U32) | 1
         i += 1
     }
+    next
+}
 
+fn grow_harness(_ next: u16) -> u16 uses (store: mut OracleStore) {
+    let next = grow(
+        current: state_cardinality_next(),
+        next,
+        observations: mut store.observations,
+    )
     write_state(
         time: state_time(),
         tick: state_tick(),
@@ -294,20 +296,30 @@ fn lte(time: u32, a: u32, b: u32) -> bool {
     a_adjusted <= b_adjusted
 }
 
-fn binary_search(time: u32, target: u32, index: u16, cardinality: u16) -> (Observation, Observation)
-uses (store: OracleStore)
-{
+fn binary_search(
+    time: u32,
+    target: u32,
+    index: u16,
+    cardinality: u16,
+    observations: ref Observations,
+) -> (Observation, Observation) {
     let mut l = ((index + 1) % cardinality) as u256
     let mut r = l + (cardinality as u256) - 1
     while true {
         let i = (l + r) / 2
-        let before_or_at = read_observation(i % (cardinality as u256))
+        let before_or_at = read_observation(
+            i % (cardinality as u256),
+            observations: ref observations,
+        )
         if !before_or_at.initialized {
             l = i + 1
             continue
         }
 
-        let at_or_after = read_observation((i + 1) % (cardinality as u256))
+        let at_or_after = read_observation(
+            (i + 1) % (cardinality as u256),
+            observations: ref observations,
+        )
         let target_at_or_after = lte(time, a: before_or_at.block_timestamp, b: target)
         if target_at_or_after && lte(time, a: target, b: at_or_after.block_timestamp) {
             return (before_or_at, at_or_after)
@@ -330,10 +342,9 @@ fn surrounding_observations(
     index: u16,
     liquidity: u128,
     cardinality: u16,
-) -> (Observation, Observation)
-uses (store: OracleStore)
-{
-    let before_or_at = read_observation(index as u256)
+    observations: ref Observations,
+) -> (Observation, Observation) {
+    let before_or_at = read_observation(index as u256, observations: ref observations)
     if lte(time, a: before_or_at.block_timestamp, b: target) {
         if before_or_at.block_timestamp == target {
             return (
@@ -358,24 +369,37 @@ uses (store: OracleStore)
         )
     }
 
-    let mut oldest = read_observation(((index + 1) % cardinality) as u256)
+    let mut oldest = read_observation(
+        ((index + 1) % cardinality) as u256,
+        observations: ref observations,
+    )
     if !oldest.initialized {
-        oldest = read_observation(0)
+        oldest = read_observation(0, observations: ref observations)
     }
     assert!(lte(time, a: oldest.block_timestamp, b: target), "OLD")
 
-    binary_search(time, target, index, cardinality)
+    binary_search(
+        time,
+        target,
+        index,
+        cardinality,
+        observations: ref observations,
+    )
 }
 
 #[arithmetic(unchecked)]
-fn observe_single(seconds_ago: u32) -> (i256, u256) uses (store: OracleStore) {
-    let time = state_time()
-    let tick = state_tick()
-    let index = state_index()
-    let liquidity = state_liquidity()
-    let cardinality = state_cardinality()
+pub fn observe_single(
+    time: u32,
+    seconds_ago: u32,
+    tick: i256,
+    index: u16,
+    liquidity: u128,
+    cardinality: u16,
+    observations: ref Observations,
+) -> (i256, u256) {
+    assert!(cardinality > 0, "I")
     if seconds_ago == 0 {
-        let mut last = read_observation(index as u256)
+        let mut last = read_observation(index as u256, observations: ref observations)
         if last.block_timestamp != time {
             last = transform(last, block_timestamp: time, tick, liquidity)
         }
@@ -390,6 +414,7 @@ fn observe_single(seconds_ago: u32) -> (i256, u256) uses (store: OracleStore) {
         index,
         liquidity,
         cardinality,
+        observations: ref observations,
     )
     if target == before_or_at.block_timestamp {
         return (before_or_at.tick_cumulative, before_or_at.seconds_per_liquidity_cumulative_x128)
@@ -401,7 +426,11 @@ fn observe_single(seconds_ago: u32) -> (i256, u256) uses (store: OracleStore) {
     let observation_time_delta = at_or_after.block_timestamp - before_or_at.block_timestamp
     let target_delta = target - before_or_at.block_timestamp
     let tick_cumulative = before_or_at.tick_cumulative
-        + ((at_or_after.tick_cumulative - before_or_at.tick_cumulative)
+        + (decode_i56_word(
+                    int_key(
+                        at_or_after.tick_cumulative - before_or_at.tick_cumulative,
+                    ),
+                )
                 / (observation_time_delta as i256)) *
             (target_delta as i256)
     let after_seconds_per_liquidity = at_or_after.seconds_per_liquidity_cumulative_x128
@@ -411,18 +440,22 @@ fn observe_single(seconds_ago: u32) -> (i256, u256) uses (store: OracleStore) {
     let seconds_per_liquidity_cumulative_x128 = before_or_at.seconds_per_liquidity_cumulative_x128
         + ((seconds_per_liquidity_delta * (target_delta as u256))
             / (observation_time_delta as u256))
-    (tick_cumulative, seconds_per_liquidity_cumulative_x128)
-}
-
-fn encode_int56(_ value: i256) -> u256 {
-    int_key(value)
+    (decode_i56_word(int_key(tick_cumulative)), seconds_per_liquidity_cumulative_x128 & MAX_U160)
 }
 
 #[arithmetic(checked)]
-fn handle_observe(return_gas: bool) -> !
-uses (evm: mut Evm, store: OracleStore)
+pub fn encode_observe(
+    return_gas: bool,
+    time: u32,
+    tick: i256,
+    index: u16,
+    liquidity: u128,
+    cardinality: u16,
+    observations: ref Observations,
+) -> MemBuffer
+uses (evm: Evm, mem: mut RawMem)
 {
-    assert!(state_cardinality() > 0, "I")
+    assert!(cardinality > 0, "I")
     let gas_before = evm.gas()
     let calldata_size = evm.calldatasize()
     assert(calldata_size >= 36)
@@ -432,37 +465,54 @@ uses (evm: mut Evm, store: OracleStore)
     let len = evm.calldataload(elements_offset - 32)
     assert(len <= (calldata_size - elements_offset) / 32)
     let second_offset = 64 + 32 + len * 32
-    let mut ticks = with (RawMem = evm) {
-        Packed::with_capacity(bytes: len * 32)
-    }
-    let mut seconds = with (RawMem = evm) {
-        Packed::with_capacity(bytes: len * 32)
-    }
+    let mut ticks = Packed::with_capacity(bytes: len * 32)
+    let mut seconds = Packed::with_capacity(bytes: len * 32)
     let mut i: u256 = 0
     while i < len {
-        let seconds_ago: u32 = evm.calldataload(elements_offset + i * 32).downcast_unchecked()
-        let (tick_cumulative, seconds_per_liquidity_cumulative_x128) = observe_single(seconds_ago)
-        with (RawMem = evm) {
-            ticks.u256(encode_int56(tick_cumulative))
-            seconds.u256(seconds_per_liquidity_cumulative_x128)
-        }
+        let seconds_word = evm.calldataload(elements_offset + i * 32)
+        let seconds_ago: u32 = seconds_word.downcast_unchecked()
+        let (tick_cumulative, seconds_per_liquidity_cumulative_x128) = observe_single(
+            time,
+            seconds_ago,
+            tick,
+            index,
+            liquidity,
+            cardinality,
+            observations: ref observations,
+        )
+        ticks.u256(int_key(tick_cumulative))
+        seconds.u256(seconds_per_liquidity_cumulative_x128)
         i += 1
     }
 
     if return_gas {
         let out = encode_abi_payload(gas_before - evm.gas())
-        evm.return_data(data: out.span())
+        return out
     }
 
+    let mut out = Packed::with_capacity(bytes: 128 + len * 64)
+    out.u256(64)
+    out.u256(second_offset)
+    out.u256(len)
+    out.append_span(ticks.span())
+    out.u256(len)
+    out.append_span(seconds.span())
+    out.into_buffer()
+}
+
+fn handle_observe_harness(return_gas: bool) -> !
+uses (evm: mut Evm, store: OracleStore)
+{
     let out = with (RawMem = evm) {
-        let mut out = Packed::with_capacity(bytes: 128 + len * 64)
-        out.u256(64)
-        out.u256(second_offset)
-        out.u256(len)
-        out.append_span(ticks.span())
-        out.u256(len)
-        out.append_span(seconds.span())
-        out.into_buffer()
+        encode_observe(
+            return_gas,
+            time: state_time(),
+            tick: state_tick(),
+            index: state_index(),
+            liquidity: state_liquidity(),
+            cardinality: state_cardinality(),
+            observations: ref store.observations,
+        )
     }
     evm.return_data(data: out.span())
 }
@@ -508,7 +558,7 @@ pub contract OracleTest uses (evm: mut Evm) {
         OracleTestMsg::Observations { index } -> (u32, i256, u256, bool)
         uses (store)
         {
-            let observation = read_observation(index)
+            let observation = read_observation(index, observations: ref store.observations)
             (
                 observation.block_timestamp,
                 observation.tick_cumulative,
@@ -558,16 +608,16 @@ pub contract OracleTest uses (evm: mut Evm) {
         }
 
         OracleTestMsg::Grow { cardinalityNext } uses (mut store) {
-            grow(cardinalityNext)
+            grow_harness(cardinalityNext)
         }
 
         _ uses (mut evm, store) {
             let selector = evm.calldataload(0) >> 224
             if selector == 0x883bdbfd {
-                handle_observe(return_gas: false)
+                handle_observe_harness(return_gas: false)
             }
             if selector == 0x74e69cef {
-                handle_observe(return_gas: true)
+                handle_observe_harness(return_gas: true)
             }
 
             revert_empty()
@@ -623,8 +673,11 @@ uses (store: OracleStore)
     } else {
         index - 1
     }
-    let observation0 = read_observation(previous_index as u256)
-    let observation1 = read_observation(index as u256)
+    let observation0 = read_observation(
+        previous_index as u256,
+        observations: ref store.observations,
+    )
+    let observation1 = read_observation(index as u256, observations: ref store.observations)
     assert(observation0.initialized)
     assert(observation1.initialized)
 
@@ -642,8 +695,24 @@ uses (store: OracleStore)
     assert(echidna_initialized())
     assert(seconds_ago > 0)
 
-    let (tick_cumulative0, seconds_per_liquidity_cumulative_x128_0) = observe_single(seconds_ago)
-    let (tick_cumulative1, seconds_per_liquidity_cumulative_x128_1) = observe_single(seconds_ago: 0)
+    let (tick_cumulative0, seconds_per_liquidity_cumulative_x128_0) = observe_single(
+        time: state_time(),
+        seconds_ago,
+        tick: state_tick(),
+        index: state_index(),
+        liquidity: state_liquidity(),
+        cardinality: state_cardinality(),
+        observations: ref store.observations,
+    )
+    let (tick_cumulative1, seconds_per_liquidity_cumulative_x128_1) = observe_single(
+        time: state_time(),
+        seconds_ago: 0,
+        tick: state_tick(),
+        index: state_index(),
+        liquidity: state_liquidity(),
+        cardinality: state_cardinality(),
+        observations: ref store.observations,
+    )
     let numerator = tick_cumulative1 - tick_cumulative0
     let seconds_ago_i = seconds_ago as i256
     let mut time_weighted_tick = numerator / seconds_ago_i
@@ -684,7 +753,7 @@ pub contract OracleEchidnaTest {
         }
 
         Grow { cardinality } uses (mut store) {
-            grow(cardinality)
+            grow_harness(cardinality)
         }
 
         EchidnaIndexAlwaysLtCardinality -> bool uses (store) {
@@ -692,7 +761,7 @@ pub contract OracleEchidnaTest {
         }
 
         EchidnaAlwaysInitialized -> bool uses (store) {
-            let observation = read_observation(0)
+            let observation = read_observation(0, observations: ref store.observations)
             state_cardinality() == 0 || observation.initialized
         }
 
@@ -707,7 +776,15 @@ pub contract OracleEchidnaTest {
                 return true
             }
 
-            observe_single(seconds_ago: 0)
+            observe_single(
+                time: state_time(),
+                seconds_ago: 0,
+                tick: state_tick(),
+                index: state_index(),
+                liquidity: state_liquidity(),
+                cardinality: state_cardinality(),
+                observations: ref store.observations,
+            )
             true
         }
 

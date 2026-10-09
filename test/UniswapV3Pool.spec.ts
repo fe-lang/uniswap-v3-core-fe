@@ -745,6 +745,140 @@ describe('UniswapV3Pool', () => {
     await mint(wallet.address, min, max, initializeLiquidityAmount)
   }
 
+  describe('oracle history', () => {
+    const liquidity = BigNumber.from(2).pow(64)
+    const perSecond = BigNumber.from(2).pow(64)
+
+    it('reserves one packed word per observation and initializes grown slots', async () => {
+      expect((await pool.observations(0)).initialized).to.eq(false)
+      await pool.initialize(encodePriceSqrt(1, 1))
+      await pool.increaseObservationCardinalityNext(3)
+      expect(BigNumber.from(await ethers.provider.getStorageAt(pool.address, 8))).to.eq(
+        BigNumber.from(TEST_POOL_START_TIME).add(BigNumber.from(1).shl(248))
+      )
+      for (const index of [1, 2]) {
+        checkObservationEquals(await pool.observations(index), {
+          blockTimestamp: 1,
+          tickCumulative: 0,
+          secondsPerLiquidityCumulativeX128: 0,
+          initialized: false,
+        })
+        expect(BigNumber.from(await ethers.provider.getStorageAt(pool.address, 8 + index))).to.eq(1)
+      }
+      expect(BigNumber.from(await ethers.provider.getStorageAt(pool.address, 65543))).to.eq(await pool.time())
+      await expect(pool.observations(65535)).to.be.reverted
+    })
+
+    it('grows, rotates, and interpolates every requested history window', async () => {
+      await pool.initialize(encodePriceSqrt(1, 1))
+      await pool.increaseObservationCardinalityNext(3)
+      await mint(wallet.address, -tickSpacing, tickSpacing, liquidity)
+      await pool.advanceTime(10)
+      await mint(wallet.address, -tickSpacing, tickSpacing, liquidity)
+      expect((await pool.slot0()).observationIndex).to.eq(1)
+      expect((await pool.slot0()).observationCardinality).to.eq(3)
+      await pool.advanceTime(10)
+      await pool.burn(-tickSpacing, tickSpacing, liquidity)
+      expect((await pool.slot0()).observationIndex).to.eq(2)
+      await pool.advanceTime(10)
+      await mint(wallet.address, -tickSpacing, tickSpacing, liquidity)
+      expect((await pool.slot0()).observationIndex).to.eq(0)
+      const result = await pool.observe([0, 5, 10, 15, 20, 5])
+      expect(result.tickCumulatives.map(String)).to.deep.eq(['0', '0', '0', '0', '0', '0'])
+      expect(result.secondsPerLiquidityCumulativeX128s.map(String)).to.deep.eq(
+        [25, 20, 15, 12.5, 10, 20].map((n) =>
+          perSecond
+            .mul(n * 2)
+            .div(2)
+            .toString()
+        )
+      )
+      await expect(pool.observe([21])).to.be.revertedWith('OLD')
+      expect((await pool.observe([])).tickCumulatives).to.deep.eq([])
+      for (const index of [0, 1, 2]) {
+        const observation = await pool.observations(index)
+        const expected = BigNumber.from(observation.blockTimestamp)
+          .add(observation.tickCumulative.toTwos(56).shl(32))
+          .add(observation.secondsPerLiquidityCumulativeX128.shl(88))
+          .add(BigNumber.from(1).shl(248))
+        expect(BigNumber.from(await ethers.provider.getStorageAt(pool.address, 8 + index))).to.eq(expected)
+      }
+    })
+
+    it('records the pre-swap tick and writes at most once per timestamp', async () => {
+      await pool.initialize(encodePriceSqrt(1, 1))
+      await pool.increaseObservationCardinalityNext(4)
+      await mint(wallet.address, -tickSpacing, tickSpacing, liquidity)
+      await pool.advanceTime(4)
+      await swapExact0For1(1000, wallet.address)
+      const tick = (await pool.slot0()).tick
+      expect(tick).to.eq(-1)
+      expect((await pool.slot0()).observationIndex).to.eq(1)
+      expect((await pool.observations(1)).tickCumulative).to.eq(0)
+      await mint(wallet.address, -tickSpacing, tickSpacing, 100)
+      expect((await pool.slot0()).observationIndex).to.eq(1)
+      await pool.advanceTime(6)
+      await pool.burn(-tickSpacing, tickSpacing, 100)
+      expect((await pool.slot0()).observationIndex).to.eq(2)
+      expect((await pool.observations(2)).tickCumulative).to.eq(-6)
+      await pool.advanceTime(5)
+      const result = await pool.observe([0, 3, 5, 8, 11, 15])
+      expect(result.tickCumulatives.map(String)).to.deep.eq(['-11', '-8', '-6', '-3', '0', '0'])
+    })
+
+    it('queries history across the uint32 timestamp rollover', async () => {
+      await pool.advanceTime(BigNumber.from(2).pow(32).sub(TEST_POOL_START_TIME).sub(5))
+      await pool.initialize(encodePriceSqrt(1, 1))
+      await pool.increaseObservationCardinalityNext(3)
+      await mint(wallet.address, -tickSpacing, tickSpacing, liquidity)
+      await pool.advanceTime(10)
+      await mint(wallet.address, -tickSpacing, tickSpacing, 1)
+      expect((await pool.observations(1)).blockTimestamp).to.eq(5)
+      const result = await pool.observe([0, 5, 10])
+      expect(result.tickCumulatives.map(String)).to.deep.eq(['0', '0', '0'])
+      expect(result.secondsPerLiquidityCumulativeX128s.map(String)).to.deep.eq(
+        [10, 5, 0].map((n) => perSecond.mul(n).toString())
+      )
+      await expect(pool.observe([11])).to.be.revertedWith('OLD')
+    })
+
+    it('wraps uint160 seconds per liquidity in stored and counterfactual observations', async () => {
+      await pool.initialize(encodePriceSqrt(1, 1))
+      await pool.increaseObservationCardinalityNext(3)
+      await mint(wallet.address, -tickSpacing, tickSpacing, 1)
+      const elapsed = BigNumber.from(2).pow(32).sub(1)
+      const mask = BigNumber.from(2).pow(160).sub(1)
+      await pool.advanceTime(elapsed)
+      await mint(wallet.address, -tickSpacing, tickSpacing, 1)
+      await pool.burn(-tickSpacing, tickSpacing, 1)
+      await pool.advanceTime(elapsed)
+      const expected = elapsed.mul(2).shl(128).and(mask)
+      expect((await pool.observe([0])).secondsPerLiquidityCumulativeX128s[0]).to.eq(expected)
+      await mint(wallet.address, -tickSpacing, tickSpacing, 1)
+      expect((await pool.observations(2)).secondsPerLiquidityCumulativeX128).to.eq(expected)
+    })
+
+    it('wraps int56 tick accumulators before historical interpolation', async () => {
+      const math = await (await getContractFactory('TickMathTest')).deploy()
+      await pool.initialize(await math.getSqrtRatioAtTick(887000))
+      await pool.increaseObservationCardinalityNext(3)
+      await mint(wallet.address, 886980, 887040, liquidity)
+      const elapsed = BigNumber.from(2).pow(32).sub(1)
+      for (let i = 0; i < 10; i++) {
+        await pool.advanceTime(elapsed)
+        await mint(wallet.address, 886980, 887040, 1)
+      }
+      const cumulative = elapsed.mul(887000).mul(10).toTwos(56).fromTwos(56)
+      expect((await pool.observe([0, 1])).tickCumulatives.map(String)).to.deep.eq([
+        cumulative.toString(),
+        cumulative.sub(887000).toTwos(56).fromTwos(56).toString(),
+      ])
+      await pool.advanceTime(elapsed)
+      const counterfactual = elapsed.mul(887000).mul(11).toTwos(56).fromTwos(56)
+      expect((await pool.observe([0])).tickCumulatives[0]).to.eq(counterfactual)
+    })
+  })
+
   describe('flash callback payload', () => {
     for (const length of [0, 1, 31, 32, 33, 95, 96, 97, 256]) {
       it(`preserves all ${length} bytes`, async () => {

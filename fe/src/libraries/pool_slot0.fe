@@ -85,6 +85,17 @@ impl PackedSlot0 {
     }
 
     #[arithmetic(unchecked)]
+    pub fn with_observation(self, index: u16, cardinality: u16) -> Self {
+        PackedSlot0 {
+            word: (self.word
+                    & !((MASK_U16 << OBSERVATION_INDEX_OFFSET)
+                        | (MASK_U16 << OBSERVATION_CARDINALITY_OFFSET)))
+                | ((index as u256) << OBSERVATION_INDEX_OFFSET)
+                | ((cardinality as u256) << OBSERVATION_CARDINALITY_OFFSET),
+        }
+    }
+
+    #[arithmetic(unchecked)]
     pub fn with_observation_cardinality_next(self, _ observation_cardinality_next: u16) -> Self {
         PackedSlot0 {
             word: (self.word & !(MASK_U16 << OBSERVATION_CARDINALITY_NEXT_OFFSET))

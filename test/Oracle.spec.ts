@@ -300,6 +300,23 @@ describe('Oracle', () => {
           }
         })
 
+        it(`${method} truncates array elements to uint32 like Solidity 0.7`, async () => {
+          const data = ethers.utils.hexConcat([
+            oracle.interface.getSighash(method),
+            word(32),
+            word(1),
+            word(BigNumber.from(2).pow(32)),
+          ])
+          const result = await ethers.provider.call({ to: oracle.address, data })
+          const decoded = oracle.interface.decodeFunctionResult(method, result)
+          if (method === 'observe') {
+            expect(decoded[0].map(String)).to.deep.eq(['0'])
+            expect(decoded[1].map(String)).to.deep.eq(['0'])
+          } else {
+            expect(decoded[0]).to.be.gt(0)
+          }
+        })
+
         for (const { name, args } of malformedArguments) {
           it(`${method} rejects ${name} before exhausting gas`, async () => {
             const data = ethers.utils.hexConcat([oracle.interface.getSighash(method), args])

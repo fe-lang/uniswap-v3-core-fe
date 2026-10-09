@@ -17,6 +17,7 @@ use super::libraries::pool_config::{
 }
 use super::libraries::pool_slot0::PackedSlot0
 use super::libraries::position
+use super::libraries::oracle
 use super::libraries::safe_cast::to_int128
 use super::libraries::sqrt_price_math::{get_amount0_delta, get_amount1_delta}
 use super::libraries::tick
@@ -162,9 +163,7 @@ struct MockTimePoolStore {
     ticks: tick::Ticks,
     bitmap: super::libraries::tick_bitmap::Bitmap,
     positions: StorageMap<u256, position::Info>,
-    observation0_block_timestamp: u32,
-    observation0_tick_cumulative: i64,
-    observation0_seconds_per_liquidity_cumulative_x128: u256,
+    observations: oracle::Observations,
     time: u256,
 }
 
@@ -220,41 +219,6 @@ fn check_unlocked(_ evm: mut Evm, _ unlocked: bool) {
 #[arithmetic(unchecked)]
 fn tick_at_sqrt_ratio(sqrt_price_x96: u256) -> i32 {
     get_tick_at_sqrt_ratio(sqrt_price_x96).downcast_unchecked()
-}
-
-#[arithmetic(unchecked)]
-fn current_tick_cumulative(tick_cumulative: i64, tick_current: i32, time_delta: u32) -> i256 {
-    (tick_cumulative as i256) + ((tick_current as i256) * (time_delta as i256))
-}
-
-#[arithmetic(unchecked)]
-fn current_seconds_per_liquidity(
-    seconds_per_liquidity_cumulative_x128: u256,
-    time_delta: u32,
-    liquidity: u128,
-) -> u256 {
-    let denominator = if liquidity > 0 { liquidity as u256 } else { 1 }
-    seconds_per_liquidity_cumulative_x128 + (((time_delta as u256) << 128) / denominator)
-}
-
-#[arithmetic(unchecked)]
-fn current_observation(
-    current_time: u32,
-    block_timestamp: u32,
-    tick_cumulative: i64,
-    tick_current: i32,
-    seconds_per_liquidity_cumulative_x128: u256,
-    liquidity: u128,
-) -> (i256, u256) {
-    let time_delta = current_time - block_timestamp
-    (
-        current_tick_cumulative(tick_cumulative, tick_current, time_delta),
-        current_seconds_per_liquidity(
-            seconds_per_liquidity_cumulative_x128,
-            time_delta,
-            liquidity,
-        ),
-    )
 }
 
 #[arithmetic(unchecked)]
@@ -421,18 +385,17 @@ uses (evm: mut Evm, store: mut MockTimePoolStore)
     let mut flipped_upper = false
     if liquidity_delta != 0 {
         current_time = store.time.downcast_unchecked()
-        let time_delta = current_time - store.observation0_block_timestamp
-        tick_cumulative = current_tick_cumulative(
-            tick_cumulative: store.observation0_tick_cumulative,
-            tick_current: slot0.tick(),
-            time_delta,
-        )
-        seconds_per_liquidity_cumulative_x128 = current_seconds_per_liquidity(
-            seconds_per_liquidity_cumulative_x128: store
-                .observation0_seconds_per_liquidity_cumulative_x128,
-            time_delta,
+        let observation = oracle::observe_single(
+            time: current_time,
+            seconds_ago: 0,
+            tick: tick_current_i,
+            index: slot0.observation_index(),
             liquidity: store.liquidity,
+            cardinality: slot0.observation_cardinality(),
+            observations: ref store.observations,
         )
+        tick_cumulative = observation.0
+        seconds_per_liquidity_cumulative_x128 = observation.1
         flipped_lower = tick::update_at(
             tick: tick_lower,
             tick_current: tick_current_i,
@@ -555,10 +518,16 @@ uses (evm: mut Evm, store: mut MockTimePoolStore)
     }
 
     if liquidity_delta != 0 && in_range {
-        store.observation0_block_timestamp = current_time
-        store.observation0_tick_cumulative = tick_cumulative.downcast_unchecked()
-        store
-            .observation0_seconds_per_liquidity_cumulative_x128 = seconds_per_liquidity_cumulative_x128
+        let (index, cardinality) = oracle::write(
+            index: slot0.observation_index(),
+            block_timestamp: current_time,
+            tick: tick_current_i,
+            liquidity: store.liquidity,
+            cardinality: slot0.observation_cardinality(),
+            cardinality_next: slot0.observation_cardinality_next(),
+            observations: mut store.observations,
+        )
+        store.slot0 = store.slot0.with_observation(index, cardinality)
         store.liquidity = add_delta(store.liquidity, liquidity_delta)
     }
 
@@ -1040,20 +1009,16 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
         }
 
         Observations uses (store, mut evm) {
-            if evm.calldataload(4) == 0 {
-                return_observation(
-                    block_timestamp: store.observation0_block_timestamp,
-                    tick_cumulative: store.observation0_tick_cumulative,
-                    seconds_per_liquidity_cumulative_x128: store
-                        .observation0_seconds_per_liquidity_cumulative_x128,
-                    initialized: true,
-                )
-            }
+            let observation = oracle::read_observation(
+                evm.calldataload(4),
+                observations: ref store.observations,
+            )
             return_observation(
-                block_timestamp: 0,
-                tick_cumulative: 0,
-                seconds_per_liquidity_cumulative_x128: 0,
-                initialized: false,
+                block_timestamp: observation.block_timestamp,
+                tick_cumulative: observation.tick_cumulative.downcast_unchecked(),
+                seconds_per_liquidity_cumulative_x128: observation
+                    .seconds_per_liquidity_cumulative_x128,
+                initialized: observation.initialized,
             )
         }
 
@@ -1068,9 +1033,10 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             )
             let tick = tick_at_sqrt_ratio(sqrt_price_x96)
             store.slot0 = PackedSlot0::initialized(sqrt_price_x96, tick)
-            store.observation0_block_timestamp = store.time.downcast_unchecked()
-            store.observation0_tick_cumulative = 0
-            store.observation0_seconds_per_liquidity_cumulative_x128 = 0
+            oracle::initialize_observations(
+                time: store.time.downcast_unchecked(),
+                observations: mut store.observations,
+            )
             emit_initialize(sqrt_price_x96, tick)
         }
 
@@ -1082,11 +1048,11 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             check_unlocked(mut evm, slot0.unlocked())
             store.slot0 = slot0.lock()
             let old = slot0.observation_cardinality_next()
-            let new = if observation_cardinality_next > old {
-                observation_cardinality_next
-            } else {
-                old
-            }
+            let new = oracle::grow(
+                current: old,
+                next: observation_cardinality_next,
+                observations: mut store.observations,
+            )
             store.slot0 = store.slot0.with_observation_cardinality_next(new)
             if old != new {
                 emit_increase_observation_cardinality_next(old, new)
@@ -1166,17 +1132,17 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 seconds_inside = sub_u32(a: seconds_outside_lower, b: seconds_outside_upper)
             } else if tick_current < upper {
                 let current_time: u32 = store.time.downcast_unchecked()
-                let time_delta = current_time - store.observation0_block_timestamp
-                let tick_cumulative = current_tick_cumulative(
-                    tick_cumulative: store.observation0_tick_cumulative,
-                    tick_current: slot0.tick(),
-                    time_delta,
-                )
-                let seconds_per_liquidity_cumulative_x128 = current_seconds_per_liquidity(
-                    seconds_per_liquidity_cumulative_x128: store
-                        .observation0_seconds_per_liquidity_cumulative_x128,
-                    time_delta,
+                let (
+                    tick_cumulative,
+                    seconds_per_liquidity_cumulative_x128,
+                ) = oracle::observe_single(
+                    time: current_time,
+                    seconds_ago: 0,
+                    tick: tick_current,
+                    index: slot0.observation_index(),
                     liquidity: store.liquidity,
+                    cardinality: slot0.observation_cardinality(),
+                    observations: ref store.observations,
                 )
                 let seconds_per_liquidity_inside_minus_lower = sub_u256(
                     a: seconds_per_liquidity_cumulative_x128,
@@ -1498,14 +1464,14 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 if sqrt_price_x96 == sqrt_price_next_tick_x96 {
                     if initialized {
                         if !computed_latest_observation {
-                            let observation = current_observation(
-                                current_time,
-                                block_timestamp: store.observation0_block_timestamp,
-                                tick_cumulative: store.observation0_tick_cumulative,
-                                tick_current: tick_start,
-                                seconds_per_liquidity_cumulative_x128: store
-                                    .observation0_seconds_per_liquidity_cumulative_x128,
+                            let observation = oracle::observe_single(
+                                time: current_time,
+                                seconds_ago: 0,
+                                tick: tick_start as i256,
+                                index: slot0_start.observation_index(),
                                 liquidity: liquidity_start,
+                                cardinality: slot0_start.observation_cardinality(),
+                                observations: ref store.observations,
                             )
                             tick_cumulative = observation.0
                             seconds_per_liquidity_cumulative_x128 = observation.1
@@ -1544,23 +1510,16 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             }
 
             if tick_current != tick_start as i256 {
-                if !computed_latest_observation {
-                    let observation = current_observation(
-                        current_time,
-                        block_timestamp: store.observation0_block_timestamp,
-                        tick_cumulative: store.observation0_tick_cumulative,
-                        tick_current: tick_start,
-                        seconds_per_liquidity_cumulative_x128: store
-                            .observation0_seconds_per_liquidity_cumulative_x128,
-                        liquidity: liquidity_start,
-                    )
-                    tick_cumulative = observation.0
-                    seconds_per_liquidity_cumulative_x128 = observation.1
-                }
-                store.observation0_block_timestamp = current_time
-                store.observation0_tick_cumulative = tick_cumulative.downcast_unchecked()
-                store
-                    .observation0_seconds_per_liquidity_cumulative_x128 = seconds_per_liquidity_cumulative_x128
+                let (index, cardinality) = oracle::write(
+                    index: slot0_start.observation_index(),
+                    block_timestamp: current_time,
+                    tick: tick_start as i256,
+                    liquidity: liquidity_start,
+                    cardinality: slot0_start.observation_cardinality(),
+                    cardinality_next: slot0_start.observation_cardinality_next(),
+                    observations: mut store.observations,
+                )
+                slot0_next = slot0_next.with_observation(index, cardinality)
                 slot0_next = slot0_next
                     .with_sqrt_price_x96(sqrt_price_x96)
                     .with_tick(tick_current.downcast_unchecked())
@@ -1644,27 +1603,19 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
         }
 
         Observe uses (mut evm, store) {
-            let current_time: u32 = store.time.downcast_unchecked()
-            let time_delta = current_time - store.observation0_block_timestamp
-            let tick_cumulative = (store.observation0_tick_cumulative as i256)
-                + ((store.slot0.tick() as i256) * (time_delta as i256))
-            let seconds_per_liquidity_cumulative_x128 = current_seconds_per_liquidity(
-                seconds_per_liquidity_cumulative_x128: store
-                    .observation0_seconds_per_liquidity_cumulative_x128,
-                time_delta,
-                liquidity: store.liquidity,
-            )
-            let out = encode_abi_payload(
-                (
-                    64 as u256,
-                    128 as u256,
-                    1 as u256,
-                    int_key(tick_cumulative),
-                    1 as u256,
-                    seconds_per_liquidity_cumulative_x128,
-                ),
-            )
-            evm.return_data(data: out.span().head(192))
+            let slot0 = store.slot0
+            let out = with (RawMem = evm) {
+                oracle::encode_observe(
+                    return_gas: false,
+                    time: store.time.downcast_unchecked(),
+                    tick: slot0.tick() as i256,
+                    index: slot0.observation_index(),
+                    liquidity: store.liquidity,
+                    cardinality: slot0.observation_cardinality(),
+                    observations: ref store.observations,
+                )
+            }
+            evm.return_data(data: out.span())
         }
 
         Ticks uses (mut evm, store) {
