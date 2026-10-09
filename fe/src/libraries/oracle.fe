@@ -1,6 +1,5 @@
 use core::ptr::MemBuffer
 use std::evm::encode_abi_payload
-use std::evm::packed::Packed
 use std::abi::sol::{self, Int24}
 use std::evm::ops::signextend
 use std::evm::{Evm, RawOps, revert_empty}
@@ -464,9 +463,12 @@ uses (evm: Evm)
     let elements_offset = 4 + args_offset + 32
     let len = evm.calldataload(elements_offset - 32)
     assert(len <= (calldata_size - elements_offset) / 32)
-    let second_offset = 64 + 32 + len * 32
-    let mut ticks = Packed::with_capacity(bytes: len * 32)
-    let mut seconds = Packed::with_capacity(bytes: len * 32)
+    let second_offset = 96 + len * 32
+    let mut out = MemBuffer::with_capacity(128 + len * 64)
+    out.write_word(offset: 0, value: 64)
+    out.write_word(offset: 32, value: second_offset)
+    out.write_word(offset: 64, value: len)
+    out.write_word(offset: second_offset, value: len)
     let mut i: u256 = 0
     while i < len {
         let seconds_word = evm.calldataload(elements_offset + i * 32)
@@ -480,8 +482,11 @@ uses (evm: Evm)
             cardinality,
             observations: ref observations,
         )
-        ticks.u256(int_key(tick_cumulative))
-        seconds.u256(seconds_per_liquidity_cumulative_x128)
+        out.write_word(offset: 96 + i * 32, value: int_key(tick_cumulative))
+        out.write_word(
+            offset: second_offset + 32 + i * 32,
+            value: seconds_per_liquidity_cumulative_x128,
+        )
         i += 1
     }
 
@@ -490,14 +495,7 @@ uses (evm: Evm)
         return out
     }
 
-    let mut out = Packed::with_capacity(bytes: 128 + len * 64)
-    out.u256(64)
-    out.u256(second_offset)
-    out.u256(len)
-    out.append_span(ticks.span())
-    out.u256(len)
-    out.append_span(seconds.span())
-    out.into_buffer()
+    out
 }
 
 fn handle_observe_harness(return_gas: bool) -> !
