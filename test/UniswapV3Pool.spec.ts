@@ -745,6 +745,17 @@ describe('UniswapV3Pool', () => {
     await mint(wallet.address, min, max, initializeLiquidityAmount)
   }
 
+  describe('flash callback payload', () => {
+    for (const length of [0, 1, 31, 32, 33, 95, 96, 97, 256]) {
+      it(`preserves all ${length} bytes`, async () => {
+        await initializeAtZeroTick(pool)
+        const receiver = await (await ethers.getContractFactory('TestUniswapV3FlashData')).deploy()
+        const data = utils.hexlify(Array.from({ length }, (_, i) => (17 + i * 31) % 256))
+        await expect(receiver.flash(pool.address, data)).to.emit(receiver, 'FlashData').withArgs(data)
+      })
+    }
+  })
+
   describe('#observe', () => {
     beforeEach(() => initializeAtZeroTick(pool))
 

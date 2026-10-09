@@ -697,14 +697,17 @@ fn call_swap_step(
     (sqrt_ratio_next_x96, amount_in, amount_out, fee_amount)
 }
 
-#[arithmetic(unchecked)]
-fn mint_callback_calldata(caller: Address, amount0: u256, amount1: u256, data_start: u256)
+#[arithmetic(checked)]
+fn call_callback(selector: u32, caller: Address, amount0: u256, amount1: u256, data_start: u256)
 uses (call: mut Call, evm: mut Evm)
 {
+    let calldata_size = evm.calldatasize()
+    assert(calldata_size >= 32 && data_start <= calldata_size - 32)
     let data_len = evm.calldataload(data_start)
+    assert(data_len <= calldata_size - data_start - 32)
     let data_size = 32 + (((data_len + 31) / 32) * 32)
     let mut buf = with (RawMem = evm) {
-        encode_packed((0xd3487997 as u32, amount0, amount1, 96 as u256)).into_buffer()
+        encode_packed((selector, amount0, amount1, 96 as u256)).into_buffer()
     }
     buf.reserve(data_size)
     evm.calldatacopy(
@@ -712,34 +715,6 @@ uses (call: mut Call, evm: mut Evm)
         dest_offset: 100,
         src_offset: data_start,
         len: data_size,
-    )
-    let mut ret = MemBuffer::empty()
-    let outcome = call
-        .raw_call(
-            addr: caller,
-            gas: evm.gas(),
-            value: 0,
-            args: buf.span(),
-            ret: mut ret,
-        )
-    if !outcome.success() {
-        bubble_last_revert()
-    }
-}
-
-#[arithmetic(unchecked)]
-fn flash_callback(caller: Address, fee0: u256, fee1: u256, data_start: u256)
-uses (call: mut Call, evm: mut Evm)
-{
-    let mut buf = with (RawMem = evm) {
-        encode_packed((0xe9cbafb0 as u32, fee0, fee1, 96 as u256, 96 as u256)).into_buffer()
-    }
-    buf.reserve(96)
-    evm.calldatacopy(
-        dest: mut buf,
-        dest_offset: 132,
-        src_offset: data_start + 32,
-        len: 96,
     )
     let mut ret = MemBuffer::empty()
     let outcome = call
@@ -1341,7 +1316,13 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             if amount1 > 0 {
                 safe_transfer(token: token1, to: recipient, value: amount1)
             }
-            flash_callback(caller: ctx.caller(), fee0, fee1, data_start)
+            call_callback(
+                selector: 0xe9cbafb0,
+                caller: ctx.caller(),
+                amount0: fee0,
+                amount1: fee1,
+                data_start,
+            )
             let balance0_after = balance_of(token: token0, account: ctx.address())
             let balance1_after = balance_of(token: token1, account: ctx.address())
             assert(balance0_before + fee0 <= balance0_after)
@@ -1762,7 +1743,13 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 0
             }
 
-            mint_callback_calldata(caller: ctx.caller(), amount0, amount1, data_start)
+            call_callback(
+                selector: 0xd3487997,
+                caller: ctx.caller(),
+                amount0,
+                amount1,
+                data_start,
+            )
 
             if amount0 > 0 {
                 let balance0_after: u256 = balance_of(token: token0, account: ctx.address())
