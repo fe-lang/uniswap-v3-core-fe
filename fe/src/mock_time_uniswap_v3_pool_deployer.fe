@@ -1,6 +1,6 @@
 use std::evm::packed::Packed
 use std::evm::encode_abi_payload
-use std::evm::{Address, Create, Evm, Log, RawMem, RawOps}
+use std::evm::{Address, Create, Evm, Log, RawOps}
 use super::libraries::tick_bitmap::int_key
 use super::mock_time_uniswap_v3_pool::MockTimeUniswapV3Pool
 
@@ -15,18 +15,14 @@ fn int24_word(_ value: i32) -> u256 {
 }
 
 #[arithmetic(unchecked)]
-fn pool_salt(token0: Address, token1: Address, fee: u32, tick_spacing: i32) -> u256
-uses (evm: mut Evm)
-{
+fn pool_salt(token0: Address, token1: Address, fee: u32, tick_spacing: i32) -> u256 {
     let packed = (((fee as u256) << 24) | int24_word(tick_spacing)) << 208
     let suffix = encode_abi_payload(packed)
-    with (RawMem = evm) {
-        let mut salt = Packed::with_capacity(bytes: 46)
-        salt.address(token0)
-        salt.address(token1)
-        salt.append_span(suffix.span().head(6))
-        salt.keccak256()
-    }
+    let mut salt = Packed::with_capacity(bytes: 46)
+    salt.address(token0)
+    salt.address(token1)
+    salt.append_span(suffix.span().head(6))
+    salt.keccak256()
 }
 
 #[arithmetic(unchecked)]

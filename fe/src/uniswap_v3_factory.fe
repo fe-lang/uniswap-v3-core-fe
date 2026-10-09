@@ -1,7 +1,7 @@
 use std::evm::encode_abi_payload
 use core::ptr::MemSpan
 use std::abi::sol::{self, Int24, Uint24}
-use std::evm::{Address, Create, Ctx, Evm, Log, RawMem, StorageMap}
+use std::evm::{Address, Create, Ctx, Evm, Log, StorageMap}
 use super::libraries::tick_bitmap::int_key
 use super::uniswap_v3_pool::UniswapV3Pool
 

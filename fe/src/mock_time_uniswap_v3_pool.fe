@@ -4,7 +4,7 @@ use std::evm::packed::encode_packed
 use std::evm::encode_abi_payload
 use core::ptr::MemBuffer
 use std::evm::ops::signextend
-use std::evm::{Address, Call, Ctx, Evm, Log, RawMem, RawOps, bubble_last_revert}
+use std::evm::{Address, Call, Ctx, Evm, Log, RawOps, bubble_last_revert}
 use super::libraries::fixed_point_128::Q128
 use super::libraries::fixed_point_96::Q96
 use super::libraries::full_math::{mul_div, mul_div_rounding_up}
@@ -180,11 +180,9 @@ fn decode_int24_word(_ word: u256) -> i256 {
 #[arithmetic(unchecked)]
 fn require_msg(_ evm: mut Evm, condition: bool, code: u256, len: u256) {
     if !condition {
-        let out = with (RawMem = evm) {
-            encode_packed(
-                (0x08c379a0 as u32, (32) as u256, (len) as u256, (code) as u256),
-            )
-        }
+        let out = encode_packed(
+            (0x08c379a0 as u32, (32) as u256, (len) as u256, (code) as u256),
+        )
         evm.revert(data: out.span().head(100))
     }
 }
@@ -305,9 +303,7 @@ fn next_sqrt_price_amount1_sub(sqrt_p_x96: u256, _ liquidity: u128, amount: u256
 fn balance_of(token: Address, account: Address) -> u256
 uses (call: mut Call, evm: mut Evm)
 {
-    let args = with (RawMem = evm) {
-        encode_packed((0x70a08231 as u32, (account.inner) as u256))
-    }
+    let args = encode_packed((0x70a08231 as u32, (account.inner) as u256))
     let mut ret = MemBuffer::with_capacity(32)
     let outcome = call
         .raw_staticcall(
@@ -675,9 +671,7 @@ uses (call: mut Call, evm: mut Evm)
     let data_len = evm.calldataload(data_start)
     assert(data_len <= calldata_size - data_start - 32)
     let data_size = 32 + (((data_len + 31) / 32) * 32)
-    let mut buf = with (RawMem = evm) {
-        encode_packed((selector, amount0, amount1, 96 as u256)).into_buffer()
-    }
+    let mut buf = encode_packed((selector, amount0, amount1, 96 as u256)).into_buffer()
     buf.reserve(data_size)
     evm.calldatacopy(
         dest: mut buf,
@@ -710,11 +704,10 @@ uses (call: mut Call, evm: mut Evm)
 {
     let data_len = evm.calldataload(data_start)
     let data_size = 32 + (((data_len + 31) / 32) * 32)
-    let mut buf = with (RawMem = evm) {
-        encode_packed(
-            (0xfa461e33 as u32, amount0_delta, amount1_delta, 96 as u256),
-        ).into_buffer()
-    }
+    let mut buf = encode_packed(
+        (0xfa461e33 as u32, amount0_delta, amount1_delta, 96 as u256),
+    )
+        .into_buffer()
     buf.reserve(data_size)
     evm.calldatacopy(
         dest: mut buf,
@@ -1604,17 +1597,15 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
 
         Observe uses (mut evm, store) {
             let slot0 = store.slot0
-            let out = with (RawMem = evm) {
-                oracle::encode_observe(
-                    return_gas: false,
-                    time: store.time.downcast_unchecked(),
-                    tick: slot0.tick() as i256,
-                    index: slot0.observation_index(),
-                    liquidity: store.liquidity,
-                    cardinality: slot0.observation_cardinality(),
-                    observations: ref store.observations,
-                )
-            }
+            let out = oracle::encode_observe(
+                return_gas: false,
+                time: store.time.downcast_unchecked(),
+                tick: slot0.tick() as i256,
+                index: slot0.observation_index(),
+                liquidity: store.liquidity,
+                cardinality: slot0.observation_cardinality(),
+                observations: ref store.observations,
+            )
             evm.return_data(data: out.span())
         }
 

@@ -3,7 +3,7 @@ use std::evm::encode_abi_payload
 use std::evm::packed::Packed
 use std::abi::sol::{self, Int24}
 use std::evm::ops::signextend
-use std::evm::{Evm, RawMem, RawOps, revert_empty}
+use std::evm::{Evm, RawOps, revert_empty}
 use super::tick_bitmap::int_key
 use super::tick_math::{MAX_TICK, MIN_TICK}
 
@@ -453,7 +453,7 @@ pub fn encode_observe(
     cardinality: u16,
     observations: ref Observations,
 ) -> MemBuffer
-uses (evm: Evm, mem: mut RawMem)
+uses (evm: Evm)
 {
     assert!(cardinality > 0, "I")
     let gas_before = evm.gas()
@@ -503,17 +503,15 @@ uses (evm: Evm, mem: mut RawMem)
 fn handle_observe_harness(return_gas: bool) -> !
 uses (evm: mut Evm, store: OracleStore)
 {
-    let out = with (RawMem = evm) {
-        encode_observe(
-            return_gas,
-            time: state_time(),
-            tick: state_tick(),
-            index: state_index(),
-            liquidity: state_liquidity(),
-            cardinality: state_cardinality(),
-            observations: ref store.observations,
-        )
-    }
+    let out = encode_observe(
+        return_gas,
+        time: state_time(),
+        tick: state_tick(),
+        index: state_index(),
+        liquidity: state_liquidity(),
+        cardinality: state_cardinality(),
+        observations: ref store.observations,
+    )
     evm.return_data(data: out.span())
 }
 

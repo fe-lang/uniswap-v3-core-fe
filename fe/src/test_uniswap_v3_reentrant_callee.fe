@@ -2,7 +2,7 @@ use core::abi::ByteInput
 use std::evm::packed::encode_packed
 use core::ptr::{MemBuffer, MemSpan}
 use std::abi::sol::{self, Uint160}
-use std::evm::{Address, Call, Ctx, Evm, RawMem}
+use std::evm::{Address, Call, Ctx, Evm}
 use super::libraries::tick_math::max_sqrt_ratio
 
 const ERROR_SELECTOR: u256 = 0x08c379a0
@@ -98,58 +98,48 @@ pub contract TestUniswapV3ReentrantCallee uses (ctx: Ctx, evm: mut Evm) {
 }
 
 fn check_locked_entrypoints(pool: Address) uses (evm: mut Evm) {
-    let swap_ptr = with (RawMem = evm) {
-        encode_packed(
-            (
-                0x128acb08 as u32,
-                (0) as u256,
-                (0) as u256,
-                (1) as u256,
-                (0) as u256,
-                (160) as u256,
-                (0) as u256,
-            ),
-        )
-    }
+    let swap_ptr = encode_packed(
+        (
+            0x128acb08 as u32,
+            (0) as u256,
+            (0) as u256,
+            (1) as u256,
+            (0) as u256,
+            (160) as u256,
+            (0) as u256,
+        ),
+    )
     raw_call_expect_lok(pool, args: swap_ptr.span().head(196))
 
-    let mint_ptr = with (RawMem = evm) {
-        encode_packed(
-            (
-                0x3c8a7d8d as u32,
-                (0) as u256,
-                (0) as u256,
-                (0) as u256,
-                (0) as u256,
-                (160) as u256,
-                (0) as u256,
-            ),
-        )
-    }
+    let mint_ptr = encode_packed(
+        (
+            0x3c8a7d8d as u32,
+            (0) as u256,
+            (0) as u256,
+            (0) as u256,
+            (0) as u256,
+            (160) as u256,
+            (0) as u256,
+        ),
+    )
     raw_call_expect_lok(pool, args: mint_ptr.span().head(196))
 
-    let collect_ptr = with (RawMem = evm) {
-        encode_packed(
-            (0x4f1eb3d8 as u32, (0) as u256, (0) as u256, (0) as u256, (0) as u256, (0) as u256),
-        )
-    }
+    let collect_ptr = encode_packed(
+        (0x4f1eb3d8 as u32, (0) as u256, (0) as u256, (0) as u256, (0) as u256, (0) as u256),
+    )
     raw_call_expect_lok(pool, args: collect_ptr.span().head(164))
 
-    let burn_ptr = with (RawMem = evm) {
-        encode_packed((0xa34123a7 as u32, (0) as u256, (0) as u256, (0) as u256))
-    }
+    let burn_ptr = encode_packed((0xa34123a7 as u32, (0) as u256, (0) as u256, (0) as u256))
     raw_call_expect_lok(pool, args: burn_ptr.span().head(100))
 
-    let flash_ptr = with (RawMem = evm) {
-        encode_packed(
-            (0x490e6cbc as u32, (0) as u256, (0) as u256, (0) as u256, (128) as u256, (0) as u256),
-        )
-    }
+    let flash_ptr = encode_packed(
+        (0x490e6cbc as u32, (0) as u256, (0) as u256, (0) as u256, (128) as u256, (0) as u256),
+    )
     raw_call_expect_lok(pool, args: flash_ptr.span().head(164))
 
-    let collect_protocol_ptr = with (RawMem = evm) {
-        encode_packed((0x85b66729 as u32, (0) as u256, (0) as u256, (0) as u256))
-    }
+    let collect_protocol_ptr = encode_packed(
+        (0x85b66729 as u32, (0) as u256, (0) as u256, (0) as u256),
+    )
     raw_call_expect_lok(pool, args: collect_protocol_ptr.span().head(100))
 
     assert!(false, "Unable to reenter")
