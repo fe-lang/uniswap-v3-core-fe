@@ -1,6 +1,5 @@
-use core::hint::black_box
+// Gas measurement entrypoints are disabled until MVS supports core::hint::black_box.
 use std::abi::sol::{self, Int24, Uint160}
-use std::evm::Evm
 
 pub const MIN_TICK: i256 = -887272
 pub const MAX_TICK: i256 = 887272
@@ -247,14 +246,8 @@ msg TickMathTestMsg {
     #[selector = 0x986cfba3]
     GetSqrtRatioAtTick { tick: i256 } -> u256,
 
-    #[selector = 0xa7398eb4]
-    GetGasCostOfGetSqrtRatioAtTick { tick: i256 } -> u256,
-
     #[selector = 0x4f76c058]
     GetTickAtSqrtRatio { sqrtPriceX96: u256 } -> i256,
-
-    #[selector = 0xb0622f67]
-    GetGasCostOfGetTickAtSqrtRatio { sqrtPriceX96: u256 } -> u256,
 
     #[selector = 0xee8847ff]
     MinSqrtRatio -> u256,
@@ -263,32 +256,14 @@ msg TickMathTestMsg {
     MaxSqrtRatio -> u256,
 }
 
-pub contract TickMathTest uses (evm: Evm) {
+pub contract TickMathTest {
     recv TickMathTestMsg {
         GetSqrtRatioAtTick { tick } -> u256 {
             get_sqrt_ratio_at_tick(tick)
         }
 
-        GetGasCostOfGetSqrtRatioAtTick { tick } -> u256
-        uses (evm)
-        {
-            let gas_before = evm.gas()
-            black_box(get_sqrt_ratio_at_tick(tick: black_box(tick)))
-            gas_before - evm.gas()
-        }
-
         GetTickAtSqrtRatio { sqrtPriceX96 } -> i256 {
             get_tick_at_sqrt_ratio(sqrt_price_x96: sqrtPriceX96)
-        }
-
-        GetGasCostOfGetTickAtSqrtRatio { sqrtPriceX96 } -> u256
-        uses (evm)
-        {
-            let gas_before = evm.gas()
-            black_box(
-                get_tick_at_sqrt_ratio(sqrt_price_x96: black_box(sqrtPriceX96)),
-            )
-            gas_before - evm.gas()
         }
 
         MinSqrtRatio -> u256 {

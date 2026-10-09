@@ -39,16 +39,6 @@ const abiOverrides = {
       outputs: [{ name: 'z', type: 'uint128' }],
       stateMutability: 'pure',
     },
-    {
-      type: 'function',
-      name: 'getGasCostOfAddDelta',
-      inputs: [
-        { name: 'x', type: 'uint128' },
-        { name: 'y', type: 'int128' },
-      ],
-      outputs: [{ name: '', type: 'uint256' }],
-      stateMutability: 'view',
-    },
   ],
   TestERC20: [
     {
@@ -971,20 +961,6 @@ const abiOverrides = {
     },
     {
       type: 'function',
-      name: 'getGasCostOfCanBeDelegateCalled',
-      inputs: [],
-      outputs: [{ name: '', type: 'uint256' }],
-      stateMutability: 'view',
-    },
-    {
-      type: 'function',
-      name: 'getGasCostOfCannotBeDelegateCalled',
-      inputs: [],
-      outputs: [{ name: '', type: 'uint256' }],
-      stateMutability: 'view',
-    },
-    {
-      type: 'function',
       name: 'callsIntoNoDelegateCallFunction',
       inputs: [],
       outputs: [],
@@ -1199,13 +1175,6 @@ const abiOverrides = {
     },
     {
       type: 'function',
-      name: 'getGasCostOfFlipTick',
-      inputs: [{ name: 'tick', type: 'int24' }],
-      outputs: [{ name: '', type: 'uint256' }],
-      stateMutability: 'nonpayable',
-    },
-    {
-      type: 'function',
       name: 'nextInitializedTickWithinOneWord',
       inputs: [
         { name: 'tick', type: 'int24' },
@@ -1215,16 +1184,6 @@ const abiOverrides = {
         { name: 'next', type: 'int24' },
         { name: 'initialized', type: 'bool' },
       ],
-      stateMutability: 'view',
-    },
-    {
-      type: 'function',
-      name: 'getGasCostOfNextInitializedTickWithinOneWord',
-      inputs: [
-        { name: 'tick', type: 'int24' },
-        { name: 'lte', type: 'bool' },
-      ],
-      outputs: [{ name: '', type: 'uint256' }],
       stateMutability: 'view',
     },
     {
@@ -1245,24 +1204,10 @@ const abiOverrides = {
     },
     {
       type: 'function',
-      name: 'getGasCostOfGetSqrtRatioAtTick',
-      inputs: [{ name: 'tick', type: 'int24' }],
-      outputs: [{ name: '', type: 'uint256' }],
-      stateMutability: 'view',
-    },
-    {
-      type: 'function',
       name: 'getTickAtSqrtRatio',
       inputs: [{ name: 'sqrtPriceX96', type: 'uint160' }],
       outputs: [{ name: '', type: 'int24' }],
       stateMutability: 'pure',
-    },
-    {
-      type: 'function',
-      name: 'getGasCostOfGetTickAtSqrtRatio',
-      inputs: [{ name: 'sqrtPriceX96', type: 'uint160' }],
-      outputs: [{ name: '', type: 'uint256' }],
-      stateMutability: 'view',
     },
     {
       type: 'function',
@@ -1298,19 +1243,6 @@ const abiOverrides = {
       ],
       stateMutability: 'pure',
     },
-    {
-      type: 'function',
-      name: 'getGasCostOfComputeSwapStep',
-      inputs: [
-        { name: 'sqrtP', type: 'uint160' },
-        { name: 'sqrtPTarget', type: 'uint160' },
-        { name: 'liquidity', type: 'uint128' },
-        { name: 'amountRemaining', type: 'int256' },
-        { name: 'feePips', type: 'uint24' },
-      ],
-      outputs: [{ name: '', type: 'uint256' }],
-      stateMutability: 'view',
-    },
   ],
   SqrtPriceMathTest: [
     {
@@ -1327,18 +1259,6 @@ const abiOverrides = {
     },
     {
       type: 'function',
-      name: 'getGasCostOfGetNextSqrtPriceFromInput',
-      inputs: [
-        { name: 'sqrtP', type: 'uint160' },
-        { name: 'liquidity', type: 'uint128' },
-        { name: 'amountIn', type: 'uint256' },
-        { name: 'zeroForOne', type: 'bool' },
-      ],
-      outputs: [{ name: '', type: 'uint256' }],
-      stateMutability: 'view',
-    },
-    {
-      type: 'function',
       name: 'getNextSqrtPriceFromOutput',
       inputs: [
         { name: 'sqrtP', type: 'uint160' },
@@ -1348,18 +1268,6 @@ const abiOverrides = {
       ],
       outputs: [{ name: 'sqrtQ', type: 'uint160' }],
       stateMutability: 'pure',
-    },
-    {
-      type: 'function',
-      name: 'getGasCostOfGetNextSqrtPriceFromOutput',
-      inputs: [
-        { name: 'sqrtP', type: 'uint160' },
-        { name: 'liquidity', type: 'uint128' },
-        { name: 'amountOut', type: 'uint256' },
-        { name: 'zeroForOne', type: 'bool' },
-      ],
-      outputs: [{ name: '', type: 'uint256' }],
-      stateMutability: 'view',
     },
     {
       type: 'function',
@@ -1384,30 +1292,6 @@ const abiOverrides = {
       ],
       outputs: [{ name: 'amount1', type: 'uint256' }],
       stateMutability: 'pure',
-    },
-    {
-      type: 'function',
-      name: 'getGasCostOfGetAmount0Delta',
-      inputs: [
-        { name: 'sqrtLower', type: 'uint160' },
-        { name: 'sqrtUpper', type: 'uint160' },
-        { name: 'liquidity', type: 'uint128' },
-        { name: 'roundUp', type: 'bool' },
-      ],
-      outputs: [{ name: '', type: 'uint256' }],
-      stateMutability: 'view',
-    },
-    {
-      type: 'function',
-      name: 'getGasCostOfGetAmount1Delta',
-      inputs: [
-        { name: 'sqrtLower', type: 'uint160' },
-        { name: 'sqrtUpper', type: 'uint160' },
-        { name: 'liquidity', type: 'uint128' },
-        { name: 'roundUp', type: 'bool' },
-      ],
-      outputs: [{ name: '', type: 'uint256' }],
-      stateMutability: 'view',
     },
   ],
 }

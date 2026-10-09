@@ -1,7 +1,6 @@
-use core::hint::black_box
+// Gas measurement entrypoints are disabled until MVS supports core::hint::black_box.
 use std::abi::sol::{self, Uint160}
 use std::evm::crypto::mulmod
-use std::evm::Evm
 use super::fixed_point_96::{Q96, RESOLUTION}
 use super::full_math::{mul_div, mul_div_rounding_up}
 use super::safe_cast::to_int256
@@ -295,24 +294,8 @@ msg SqrtPriceMathTestMsg {
         zeroForOne: bool,
     } -> u256,
 
-    #[selector = 0x034d21e4]
-    GetGasCostOfGetNextSqrtPriceFromInput {
-        sqrtP: u256,
-        liquidity: u128,
-        amountIn: u256,
-        zeroForOne: bool,
-    } -> u256,
-
     #[selector = 0xfedf2b5f]
     GetNextSqrtPriceFromOutput {
-        sqrtP: u256,
-        liquidity: u128,
-        amountOut: u256,
-        zeroForOne: bool,
-    } -> u256,
-
-    #[selector = 0xe20f7ac0]
-    GetGasCostOfGetNextSqrtPriceFromOutput {
         sqrtP: u256,
         liquidity: u128,
         amountOut: u256,
@@ -324,25 +307,9 @@ msg SqrtPriceMathTestMsg {
 
     #[selector = 0x48a0c5bd]
     GetAmount1Delta { sqrtLower: u256, sqrtUpper: u256, liquidity: u128, roundUp: bool } -> u256,
-
-    #[selector = 0xd7cdaf71]
-    GetGasCostOfGetAmount0Delta {
-        sqrtLower: u256,
-        sqrtUpper: u256,
-        liquidity: u128,
-        roundUp: bool,
-    } -> u256,
-
-    #[selector = 0xaf955e3b]
-    GetGasCostOfGetAmount1Delta {
-        sqrtLower: u256,
-        sqrtUpper: u256,
-        liquidity: u128,
-        roundUp: bool,
-    } -> u256,
 }
 
-pub contract SqrtPriceMathTest uses (evm: Evm) {
+pub contract SqrtPriceMathTest {
     recv SqrtPriceMathTestMsg {
         GetNextSqrtPriceFromInput { sqrtP, liquidity, amountIn, zeroForOne } -> u256 {
             get_next_sqrt_price_from_input(
@@ -353,21 +320,6 @@ pub contract SqrtPriceMathTest uses (evm: Evm) {
             )
         }
 
-        GetGasCostOfGetNextSqrtPriceFromInput { sqrtP, liquidity, amountIn, zeroForOne } -> u256
-        uses (evm)
-        {
-            let gas_before = evm.gas()
-            black_box(
-                get_next_sqrt_price_from_input(
-                    sqrt_p_x96: black_box(sqrtP),
-                    black_box(liquidity),
-                    amount_in: black_box(amountIn),
-                    zero_for_one: black_box(zeroForOne),
-                ),
-            )
-            gas_before - evm.gas()
-        }
-
         GetNextSqrtPriceFromOutput { sqrtP, liquidity, amountOut, zeroForOne } -> u256 {
             get_next_sqrt_price_from_output(
                 sqrt_p_x96: sqrtP,
@@ -375,21 +327,6 @@ pub contract SqrtPriceMathTest uses (evm: Evm) {
                 amount_out: amountOut,
                 zero_for_one: zeroForOne,
             )
-        }
-
-        GetGasCostOfGetNextSqrtPriceFromOutput { sqrtP, liquidity, amountOut, zeroForOne } -> u256
-        uses (evm)
-        {
-            let gas_before = evm.gas()
-            black_box(
-                get_next_sqrt_price_from_output(
-                    sqrt_p_x96: black_box(sqrtP),
-                    black_box(liquidity),
-                    amount_out: black_box(amountOut),
-                    zero_for_one: black_box(zeroForOne),
-                ),
-            )
-            gas_before - evm.gas()
         }
 
         GetAmount0Delta { sqrtLower, sqrtUpper, liquidity, roundUp } -> u256 {
@@ -408,36 +345,6 @@ pub contract SqrtPriceMathTest uses (evm: Evm) {
                 liquidity,
                 round_up: roundUp,
             )
-        }
-
-        GetGasCostOfGetAmount0Delta { sqrtLower, sqrtUpper, liquidity, roundUp } -> u256
-        uses (evm)
-        {
-            let gas_before = evm.gas()
-            black_box(
-                get_amount0_delta(
-                    sqrt_ratio_a_x96: black_box(sqrtLower),
-                    sqrt_ratio_b_x96: black_box(sqrtUpper),
-                    black_box(liquidity),
-                    round_up: black_box(roundUp),
-                ),
-            )
-            gas_before - evm.gas()
-        }
-
-        GetGasCostOfGetAmount1Delta { sqrtLower, sqrtUpper, liquidity, roundUp } -> u256
-        uses (evm)
-        {
-            let gas_before = evm.gas()
-            black_box(
-                get_amount1_delta(
-                    sqrt_ratio_a_x96: black_box(sqrtLower),
-                    sqrt_ratio_b_x96: black_box(sqrtUpper),
-                    black_box(liquidity),
-                    round_up: black_box(roundUp),
-                ),
-            )
-            gas_before - evm.gas()
         }
     }
 }

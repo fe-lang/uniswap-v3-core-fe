@@ -1,6 +1,5 @@
-use core::hint::black_box
+// Gas measurement entrypoints are disabled until MVS supports core::hint::black_box.
 use std::abi::sol::{self, Uint24, Uint160}
-use std::evm::Evm
 use super::full_math::{mul_div, mul_div_rounding_up}
 use super::sqrt_price_math::{
     get_amount0_delta,
@@ -180,18 +179,9 @@ msg SwapMathTestMsg {
         amountRemaining: i256,
         feePips: u256,
     } -> (u256, u256, u256, u256),
-
-    #[selector = 0xd28c51b7]
-    GetGasCostOfComputeSwapStep {
-        sqrtP: u256,
-        sqrtPTarget: u256,
-        liquidity: u128,
-        amountRemaining: i256,
-        feePips: u256,
-    } -> u256,
 }
 
-pub contract SwapMathTest uses (evm: Evm) {
+pub contract SwapMathTest {
     recv SwapMathTestMsg {
         ComputeSwapStep { sqrtP, sqrtPTarget, liquidity, amountRemaining, feePips } -> (
             u256,
@@ -206,30 +196,6 @@ pub contract SwapMathTest uses (evm: Evm) {
                 amount_remaining: amountRemaining,
                 fee_pips: feePips,
             )
-        }
-
-        GetGasCostOfComputeSwapStep {
-            sqrtP,
-            sqrtPTarget,
-            liquidity,
-            amountRemaining,
-            feePips,
-        } -> u256
-        uses (evm)
-        {
-            let gas_before = evm.gas()
-            let (sqrt_ratio_next_x96, amount_in, amount_out, fee_amount) = compute_swap_step(
-                sqrt_ratio_current_x96: black_box(sqrtP),
-                sqrt_ratio_target_x96: black_box(sqrtPTarget),
-                black_box(liquidity),
-                amount_remaining: black_box(amountRemaining),
-                fee_pips: black_box(feePips),
-            )
-            black_box(sqrt_ratio_next_x96)
-            black_box(amount_in)
-            black_box(amount_out)
-            black_box(fee_amount)
-            gas_before - evm.gas()
         }
     }
 }
