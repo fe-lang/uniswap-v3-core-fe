@@ -200,7 +200,7 @@ describe('UniswapV3Pool', () => {
     const receipt = await tx.wait()
     const poolAddress = receipt.events?.[0].args?.pool as string
 
-    if (!usingFeArtifacts) expect(poolAddress).to.eq(expectedAddress)
+    expect(poolAddress).to.eq(expectedAddress)
     const params = await deployer.parameters()
     expect(params.factory).to.eq(constants.AddressZero)
     expect(params.token0).to.eq(constants.AddressZero)
