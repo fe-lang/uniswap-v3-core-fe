@@ -1,24 +1,19 @@
-use core::ptr
-use super::mem::{at, span}
-use std::evm::{Evm, RawMem, RawOps}
+use std::evm::{encode_msg_calldata, revert_bytes}
 
-const ERROR_STRING_SELECTOR_WORD: u256 = 0x08c379a000000000000000000000000000000000000000000000000000000000
+msg ShortError {
+    #[selector = 0x08c379a0]
+    Reason { data: Bytes },
+}
 
 pub const MSG_LA: u256 = 0x4c41000000000000000000000000000000000000000000000000000000000000
 pub const MSG_LO: u256 = 0x4c4f000000000000000000000000000000000000000000000000000000000000
 pub const MSG_LS: u256 = 0x4c53000000000000000000000000000000000000000000000000000000000000
 pub const MSG_NP: u256 = 0x4e50000000000000000000000000000000000000000000000000000000000000
 
-pub fn require_short(_ evm: mut Evm, condition: bool, code: u256, len: u256) {
+pub fn require_short(condition: bool, code: u256, len: u256) {
     if !condition {
-        // SAFETY: Raw word accesses and views below stay within this 100-byte allocation.
-        let ptr = ptr::alloc_bytes(100)
-        unsafe {
-            evm.mstore(addr: ptr, value: ERROR_STRING_SELECTOR_WORD)
-            evm.mstore(addr: at(ptr, 4), value: 32)
-            evm.mstore(addr: at(ptr, 36), value: len)
-            evm.mstore(addr: at(ptr, 68), value: code)
-        }
-        evm.revert(data: unsafe { span(ptr, 100) })
+        let data = Bytes::from_word_prefix(word: code, len)
+        let encoded = encode_msg_calldata(ShortError::Reason { data })
+        revert_bytes(encoded.span())
     }
 }

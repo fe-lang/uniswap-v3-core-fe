@@ -1,18 +1,20 @@
-// Raw storage belongs exclusively to the Oracle test harnesses: observations
-// occupy slots 0..65534, followed by state and Echidna bookkeeping at 65535..65537.
-// These contracts declare no compiler-managed storage fields.
-use core::ptr::{self, MemSpan}
-use super::mem::{at, span}
+use std::evm::encode_abi_payload
+use std::evm::packed::Packed
 use std::abi::sol::{self, Int24}
 use std::evm::ops::signextend
-use std::evm::{Evm, RawMem, RawOps, RawStorage}
+use std::evm::{Evm, RawMem, RawOps, revert_empty}
 use super::tick_bitmap::int_key
 use super::tick_math::{MAX_TICK, MIN_TICK}
 
 const OBSERVATION_COUNT: u256 = 65535
-const STATE_SLOT: u256 = 65535
-const ECHIDNA_INITIALIZED_SLOT: u256 = 65536
-const ECHIDNA_TIME_PASSED_SLOT: u256 = 65537
+// The native word array and following full words retain slots 0..65537.
+struct OracleStore {
+    observations: [u256; 65535],
+    state: u256,
+    initialized: u256,
+    time_passed: u256,
+}
+
 const MAX_U16: u256 = 0xffff
 const MAX_U32: u256 = 0xffffffff
 const MAX_U128: u256 = 0xffffffffffffffffffffffffffffffff
@@ -42,10 +44,8 @@ fn observation_slot(_ index: u256) -> u256 {
     index
 }
 
-fn read_observation(_ index: u256) -> Observation uses (evm: Evm) {
-    let word = unsafe {
-        evm.sload(observation_slot(index))
-    }
+fn read_observation(_ index: u256) -> Observation uses (store: OracleStore) {
+    let word = store.observations[observation_slot(index) as usize]
     Observation {
         block_timestamp: (word & MAX_U32).downcast_unchecked(),
         tick_cumulative: decode_i56_word(word >> 32),
@@ -61,7 +61,7 @@ fn write_observation(
     seconds_per_liquidity_cumulative_x128: u256,
     initialized: bool,
 )
-uses (evm: mut Evm)
+uses (store: mut OracleStore)
 {
     assert(seconds_per_liquidity_cumulative_x128 <= MAX_U160)
     let initialized_word = if initialized { 1 } else { 0 }
@@ -69,63 +69,55 @@ uses (evm: mut Evm)
         | (signed_word(tick_cumulative, bits: 56) << 32)
         | (seconds_per_liquidity_cumulative_x128 << 88)
         | (initialized_word << 248)
-    unsafe {
-        evm.sstore(slot: observation_slot(index), value: word)
-    }
+    store.observations[observation_slot(index) as usize] = word
 }
 
-fn state_word() -> u256 uses (evm: Evm) {
-    unsafe {
-        evm.sload(STATE_SLOT)
-    }
+fn state_word() -> u256 uses (store: OracleStore) {
+    store.state
 }
 
-fn state_time() -> u32 uses (evm: Evm) {
+fn state_time() -> u32 uses (store: OracleStore) {
     (state_word() & MAX_U32).downcast_unchecked()
 }
 
-fn state_tick() -> i256 uses (evm: Evm) {
+fn state_tick() -> i256 uses (store: OracleStore) {
     decode_i24_word(state_word() >> 32)
 }
 
-fn state_liquidity() -> u128 uses (evm: Evm) {
+fn state_liquidity() -> u128 uses (store: OracleStore) {
     ((state_word() >> 56) & MAX_U128).downcast_unchecked()
 }
 
-fn state_index() -> u16 uses (evm: Evm) {
+fn state_index() -> u16 uses (store: OracleStore) {
     ((state_word() >> 184) & MAX_U16).downcast_unchecked()
 }
 
-fn state_cardinality() -> u16 uses (evm: Evm) {
+fn state_cardinality() -> u16 uses (store: OracleStore) {
     ((state_word() >> 200) & MAX_U16).downcast_unchecked()
 }
 
-fn state_cardinality_next() -> u16 uses (evm: Evm) {
+fn state_cardinality_next() -> u16 uses (store: OracleStore) {
     ((state_word() >> 216) & MAX_U16).downcast_unchecked()
 }
 
-fn echidna_initialized() -> bool uses (evm: Evm) {
-    unsafe { evm.sload(ECHIDNA_INITIALIZED_SLOT) } != 0
+fn echidna_initialized() -> bool uses (store: OracleStore) {
+    store.initialized != 0
 }
 
-fn set_echidna_initialized() uses (evm: mut Evm) {
-    unsafe {
-        evm.sstore(slot: ECHIDNA_INITIALIZED_SLOT, value: 1)
-    }
+fn set_echidna_initialized() uses (store: mut OracleStore) {
+    store.initialized = 1
 }
 
-fn echidna_time_passed() -> u32 uses (evm: Evm) {
-    (unsafe { evm.sload(ECHIDNA_TIME_PASSED_SLOT) } & MAX_U32).downcast_unchecked()
+fn echidna_time_passed() -> u32 uses (store: OracleStore) {
+    (store.time_passed & MAX_U32).downcast_unchecked()
 }
 
-fn set_echidna_time_passed(_ time_passed: u32) uses (evm: mut Evm) {
-    unsafe {
-        evm.sstore(slot: ECHIDNA_TIME_PASSED_SLOT, value: time_passed as u256)
-    }
+fn set_echidna_time_passed(_ time_passed: u32) uses (store: mut OracleStore) {
+    store.time_passed = time_passed as u256
 }
 
 #[arithmetic(unchecked)]
-fn limit_echidna_time_passed(by: u32) uses (evm: mut Evm) {
+fn limit_echidna_time_passed(by: u32) uses (store: mut OracleStore) {
     let time_passed = echidna_time_passed()
     assert(time_passed + by >= time_passed)
     set_echidna_time_passed(time_passed + by)
@@ -139,7 +131,7 @@ fn write_state(
     cardinality: u16,
     cardinality_next: u16,
 )
-uses (evm: mut Evm)
+uses (store: mut OracleStore)
 {
     let word = (time as u256)
         | (signed_word(tick, bits: 24) << 32)
@@ -147,9 +139,7 @@ uses (evm: mut Evm)
         | ((index as u256) << 184)
         | ((cardinality as u256) << 200)
         | ((cardinality_next as u256) << 216)
-    unsafe {
-        evm.sstore(slot: STATE_SLOT, value: word)
-    }
+    store.state = word
 }
 
 #[arithmetic(unchecked)]
@@ -166,7 +156,9 @@ fn transform(last: Observation, block_timestamp: u32, tick: i256, liquidity: u12
     }
 }
 
-pub fn initialize(time: u32, tick: i256, liquidity: u128) uses (evm: mut Evm) {
+pub fn initialize(time: u32, tick: i256, liquidity: u128)
+uses (store: mut OracleStore)
+{
     assert!(state_cardinality() == 0, "already initialized")
     write_observation(
         index: 0,
@@ -186,7 +178,7 @@ pub fn initialize(time: u32, tick: i256, liquidity: u128) uses (evm: mut Evm) {
 }
 
 #[arithmetic(unchecked)]
-pub fn advance_time(_ by: u32) uses (evm: mut Evm) {
+pub fn advance_time(_ by: u32) uses (store: mut OracleStore) {
     write_state(
         time: state_time() + by,
         tick: state_tick(),
@@ -206,7 +198,7 @@ fn write(
     cardinality: u16,
     cardinality_next: u16,
 ) -> (u16, u16)
-uses (evm: mut Evm)
+uses (store: mut OracleStore)
 {
     let last = read_observation(index as u256)
     if last.block_timestamp == block_timestamp {
@@ -233,7 +225,7 @@ uses (evm: mut Evm)
 
 #[arithmetic(unchecked)]
 pub fn update(_ advance_time_by: u32, tick: i256, liquidity: u128)
-uses (evm: mut Evm)
+uses (store: mut OracleStore)
 {
     let time = state_time() + advance_time_by
     let (index, cardinality) = write(
@@ -254,7 +246,7 @@ uses (evm: mut Evm)
     )
 }
 
-pub fn grow(_ next: u16) -> u16 uses (evm: mut Evm) {
+pub fn grow(_ next: u16) -> u16 uses (store: mut OracleStore) {
     let current = state_cardinality_next()
     assert!(current > 0, "I")
     if next <= current {
@@ -303,7 +295,7 @@ fn lte(time: u32, a: u32, b: u32) -> bool {
 }
 
 fn binary_search(time: u32, target: u32, index: u16, cardinality: u16) -> (Observation, Observation)
-uses (evm: Evm)
+uses (store: OracleStore)
 {
     let mut l = ((index + 1) % cardinality) as u256
     let mut r = l + (cardinality as u256) - 1
@@ -328,7 +320,7 @@ uses (evm: Evm)
         }
     }
 
-    evm.revert(data: MemSpan::empty())
+    revert_empty()
 }
 
 fn surrounding_observations(
@@ -339,7 +331,7 @@ fn surrounding_observations(
     liquidity: u128,
     cardinality: u16,
 ) -> (Observation, Observation)
-uses (evm: Evm)
+uses (store: OracleStore)
 {
     let before_or_at = read_observation(index as u256)
     if lte(time, a: before_or_at.block_timestamp, b: target) {
@@ -376,7 +368,7 @@ uses (evm: Evm)
 }
 
 #[arithmetic(unchecked)]
-fn observe_single(seconds_ago: u32) -> (i256, u256) uses (evm: Evm) {
+fn observe_single(seconds_ago: u32) -> (i256, u256) uses (store: OracleStore) {
     let time = state_time()
     let tick = state_tick()
     let index = state_index()
@@ -427,7 +419,9 @@ fn encode_int56(_ value: i256) -> u256 {
 }
 
 #[arithmetic(checked)]
-fn handle_observe(return_gas: bool) -> ! uses (evm: mut Evm) {
+fn handle_observe(return_gas: bool) -> !
+uses (evm: mut Evm, store: OracleStore)
+{
     assert!(state_cardinality() > 0, "I")
     let gas_before = evm.gas()
     let calldata_size = evm.calldatasize()
@@ -437,44 +431,40 @@ fn handle_observe(return_gas: bool) -> ! uses (evm: mut Evm) {
     let elements_offset = 4 + args_offset + 32
     let len = evm.calldataload(elements_offset - 32)
     assert(len <= (calldata_size - elements_offset) / 32)
-    let out_len = 128 + len * 64
-    let out = ptr::alloc_bytes(out_len)
-    let first_offset: u256 = 64
     let second_offset = 64 + 32 + len * 32
-    // SAFETY: Checked size arithmetic covers both array headers and every word
-    // below; the calldata extent check also bounds all element reads.
-    unsafe {
-        evm.mstore(addr: out, value: first_offset)
-        evm.mstore(addr: at(out, 32), value: second_offset)
-        evm.mstore(addr: at(out, first_offset), value: len)
-        evm.mstore(addr: at(out, second_offset), value: len)
+    let mut ticks = with (RawMem = evm) {
+        Packed::with_capacity(bytes: len * 32)
     }
-
+    let mut seconds = with (RawMem = evm) {
+        Packed::with_capacity(bytes: len * 32)
+    }
     let mut i: u256 = 0
     while i < len {
         let seconds_ago: u32 = evm.calldataload(elements_offset + i * 32).downcast_unchecked()
         let (tick_cumulative, seconds_per_liquidity_cumulative_x128) = observe_single(seconds_ago)
-        unsafe {
-            evm.mstore(
-                addr: at(out, first_offset + 32 + i * 32),
-                value: encode_int56(tick_cumulative),
-            )
-            evm.mstore(
-                addr: at(out, second_offset + 32 + i * 32),
-                value: seconds_per_liquidity_cumulative_x128,
-            )
+        with (RawMem = evm) {
+            ticks.u256(encode_int56(tick_cumulative))
+            seconds.u256(seconds_per_liquidity_cumulative_x128)
         }
         i += 1
     }
 
     if return_gas {
-        unsafe {
-            evm.mstore(addr: out, value: gas_before - evm.gas())
-            evm.return_data(data: span(out, 32))
-        }
+        let out = encode_abi_payload(gas_before - evm.gas())
+        evm.return_data(data: out.span())
     }
 
-    evm.return_data(data: unsafe { span(out, out_len) })
+    let out = with (RawMem = evm) {
+        let mut out = Packed::with_capacity(bytes: 128 + len * 64)
+        out.u256(64)
+        out.u256(second_offset)
+        out.u256(len)
+        out.append_span(ticks.span())
+        out.u256(len)
+        out.append_span(seconds.span())
+        out.into_buffer()
+    }
+    evm.return_data(data: out.span())
 }
 
 msg OracleTestMsg {
@@ -513,9 +503,10 @@ msg OracleTestMsg {
 }
 
 pub contract OracleTest uses (evm: mut Evm) {
+    mut store: OracleStore,
     recv {
         OracleTestMsg::Observations { index } -> (u32, i256, u256, bool)
-        uses (evm)
+        uses (store)
         {
             let observation = read_observation(index)
             (
@@ -526,51 +517,51 @@ pub contract OracleTest uses (evm: mut Evm) {
             )
         }
 
-        OracleTestMsg::Time {} -> u32 uses (evm) {
+        OracleTestMsg::Time {} -> u32 uses (store) {
             state_time()
         }
 
-        OracleTestMsg::Tick {} -> i256 uses (evm) {
+        OracleTestMsg::Tick {} -> i256 uses (store) {
             state_tick()
         }
 
-        OracleTestMsg::Liquidity {} -> u128 uses (evm) {
+        OracleTestMsg::Liquidity {} -> u128 uses (store) {
             state_liquidity()
         }
 
-        OracleTestMsg::Index {} -> u16 uses (evm) {
+        OracleTestMsg::Index {} -> u16 uses (store) {
             state_index()
         }
 
-        OracleTestMsg::Cardinality {} -> u16 uses (evm) {
+        OracleTestMsg::Cardinality {} -> u16 uses (store) {
             state_cardinality()
         }
 
-        OracleTestMsg::CardinalityNext {} -> u16 uses (evm) {
+        OracleTestMsg::CardinalityNext {} -> u16 uses (store) {
             state_cardinality_next()
         }
 
         OracleTestMsg::Initialize { time, tick, liquidity }
-        uses (mut evm)
+        uses (mut store)
         {
             initialize(time, tick, liquidity)
         }
 
-        OracleTestMsg::AdvanceTime { by } uses (mut evm) {
+        OracleTestMsg::AdvanceTime { by } uses (mut store) {
             advance_time(by)
         }
 
         OracleTestMsg::Update { advanceTimeBy, tick, liquidity }
-        uses (mut evm)
+        uses (mut store)
         {
             update(advanceTimeBy, tick, liquidity)
         }
 
-        OracleTestMsg::Grow { cardinalityNext } uses (mut evm) {
+        OracleTestMsg::Grow { cardinalityNext } uses (mut store) {
             grow(cardinalityNext)
         }
 
-        _ uses (mut evm) {
+        _ uses (mut evm, store) {
             let selector = evm.calldataload(0) >> 224
             if selector == 0x883bdbfd {
                 handle_observe(return_gas: false)
@@ -579,7 +570,7 @@ pub contract OracleTest uses (evm: mut Evm) {
                 handle_observe(return_gas: true)
             }
 
-            evm.revert(data: MemSpan::empty())
+            revert_empty()
         }
     }
 }
@@ -620,7 +611,7 @@ msg OracleEchidnaTestMsg {
 
 #[arithmetic(unchecked)]
 fn check_two_adjacent_observations_tick_cumulative_mod_time_elapsed_always0(index: u16)
-uses (evm: Evm)
+uses (store: OracleStore)
 {
     let cardinality = state_cardinality()
     assert(
@@ -646,7 +637,7 @@ uses (evm: Evm)
 
 #[arithmetic(unchecked)]
 fn check_time_weighted_averages_always_fit_type(seconds_ago: u32)
-uses (evm: Evm)
+uses (store: OracleStore)
 {
     assert(echidna_initialized())
     assert(seconds_ago > 0)
@@ -672,44 +663,45 @@ uses (evm: Evm)
     )
 }
 
-pub contract OracleEchidnaTest uses (evm: mut Evm) {
+pub contract OracleEchidnaTest {
+    mut store: OracleStore,
     recv OracleEchidnaTestMsg {
-        Initialize { time, tick, liquidity } uses (mut evm) {
+        Initialize { time, tick, liquidity } uses (mut store) {
             initialize(time, tick: tick.val as i256, liquidity)
             set_echidna_initialized()
         }
 
-        AdvanceTime { by } uses (mut evm) {
+        AdvanceTime { by } uses (mut store) {
             limit_echidna_time_passed(by)
             advance_time(by)
         }
 
         Update { advanceTimeBy, tick, liquidity }
-        uses (mut evm)
+        uses (mut store)
         {
             limit_echidna_time_passed(by: advanceTimeBy)
             update(advanceTimeBy, tick: tick.val as i256, liquidity)
         }
 
-        Grow { cardinality } uses (mut evm) {
+        Grow { cardinality } uses (mut store) {
             grow(cardinality)
         }
 
-        EchidnaIndexAlwaysLtCardinality -> bool uses (evm) {
+        EchidnaIndexAlwaysLtCardinality -> bool uses (store) {
             state_index() < state_cardinality() || !echidna_initialized()
         }
 
-        EchidnaAlwaysInitialized -> bool uses (evm) {
+        EchidnaAlwaysInitialized -> bool uses (store) {
             let observation = read_observation(0)
             state_cardinality() == 0 || observation.initialized
         }
 
-        EchidnaCardinalityAlwaysLteNext -> bool uses (evm) {
+        EchidnaCardinalityAlwaysLteNext -> bool uses (store) {
             state_cardinality() <= state_cardinality_next()
         }
 
         EchidnaCanAlwaysObserve0IfInitialized -> bool
-        uses (evm)
+        uses (store)
         {
             if !echidna_initialized() {
                 return true
@@ -720,13 +712,13 @@ pub contract OracleEchidnaTest uses (evm: mut Evm) {
         }
 
         CheckTwoAdjacentObservationsTickCumulativeModTimeElapsedAlways0 { index }
-        uses (evm)
+        uses (store)
         {
             check_two_adjacent_observations_tick_cumulative_mod_time_elapsed_always0(index)
         }
 
         CheckTimeWeightedAveragesAlwaysFitsType { secondsAgo }
-        uses (evm)
+        uses (store)
         {
             check_time_weighted_averages_always_fit_type(seconds_ago: secondsAgo)
         }

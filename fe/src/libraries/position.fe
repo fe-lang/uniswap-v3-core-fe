@@ -1,6 +1,5 @@
-use core::ptr
-use super::mem::{at, span}
-use std::evm::{Address, Evm, RawMem, RawStorage}
+use std::evm::encode_abi_payload
+use std::evm::{Address, Evm}
 use super::fixed_point_128::Q128
 use super::full_math::mul_div
 use super::liquidity_math::add_delta
@@ -22,174 +21,59 @@ fn checked_int24_word(_ value: i256) -> u256 {
 pub fn position_key(owner: Address, tick_lower: i256, tick_upper: i256) -> u256
 uses (evm: mut Evm)
 {
-    // SAFETY: Raw word accesses and views below stay within this 32-byte allocation.
-    let ptr = ptr::alloc_bytes(32)
     let word = (owner.inner << 96)
         | (checked_int24_word(tick_lower) << 72)
         | (checked_int24_word(tick_upper) << 48)
-    unsafe {
-        evm.mstore(addr: ptr, value: word)
-    }
-    evm.keccak256(data: unsafe { span(ptr, 26) })
+    let ptr = encode_abi_payload((word,))
+    evm.keccak256(data: ptr.span().head(26))
 }
 
-#[arithmetic(unchecked)]
-pub fn mapping_slot(key: u256, positions_slot: u256) -> u256 uses (evm: mut Evm) {
-    // SAFETY: Raw word accesses and views below stay within this 64-byte allocation.
-    let ptr = ptr::alloc_bytes(64)
-    unsafe {
-        evm.mstore(addr: ptr, value: key)
-        evm.mstore(addr: at(ptr, 32), value: positions_slot)
-    }
-    evm.keccak256(data: unsafe { span(ptr, 64) })
+/// The four words of a Solidity position entry. Keeping liquidity in a full
+/// word preserves the existing layout; the two owed amounts share the last word.
+pub struct Info {
+    liquidity: u256,
+    fee_growth_inside0_last_x128: u256,
+    fee_growth_inside1_last_x128: u256,
+    tokens_owed0: u128,
+    tokens_owed1: u128,
 }
 
-#[arithmetic(unchecked)]
-pub fn position_slot(
-    owner: Address,
-    tick_lower: i256,
-    tick_upper: i256,
-    positions_slot: u256,
-) -> u256
-uses (evm: mut Evm)
-{
-    mapping_slot(
-        key: position_key(owner, tick_lower: tick_lower, tick_upper: tick_upper),
-        positions_slot: positions_slot,
-    )
+pub fn read_tokens_owed(_ info: ref Info) -> (u128, u128) {
+    (info.tokens_owed0, info.tokens_owed1)
 }
 
-#[arithmetic(unchecked)]
-unsafe fn slot0(_ base_slot: u256) -> u256 uses (evm: mut Evm) {
-    evm.sload(base_slot)
+pub fn set_tokens_owed(_ info: mut Info, token0: u128, token1: u128) {
+    info.tokens_owed0 = token0
+    info.tokens_owed1 = token1
 }
 
-#[arithmetic(unchecked)]
-unsafe fn slot1(_ base_slot: u256) -> u256 uses (evm: mut Evm) {
-    evm.sload(base_slot + 1)
-}
-
-#[arithmetic(unchecked)]
-unsafe fn slot2(_ base_slot: u256) -> u256 uses (evm: mut Evm) {
-    evm.sload(base_slot + 2)
-}
-
-#[arithmetic(unchecked)]
-unsafe fn slot3(_ base_slot: u256) -> u256 uses (evm: mut Evm) {
-    evm.sload(base_slot + 3)
-}
-
-/// # Safety
-/// `base_slot..=base_slot + 3` must be the raw position storage range derived
-/// by this module, disjoint from compiler-managed fields.
-#[arithmetic(unchecked)]
-pub unsafe fn liquidity(_ base_slot: u256) -> u128 uses (evm: mut Evm) {
-    (slot0(base_slot) & MASK_U128).downcast_unchecked()
-}
-
-/// # Safety
-/// `base_slot..=base_slot + 3` must be the raw position storage range derived
-/// by this module, disjoint from compiler-managed fields.
-#[arithmetic(unchecked)]
-pub unsafe fn fee_growth_inside0_last_x128(_ base_slot: u256) -> u256 uses (evm: mut Evm) {
-    slot1(base_slot)
-}
-
-/// # Safety
-/// `base_slot..=base_slot + 3` must be the raw position storage range derived
-/// by this module, disjoint from compiler-managed fields.
-#[arithmetic(unchecked)]
-pub unsafe fn fee_growth_inside1_last_x128(_ base_slot: u256) -> u256 uses (evm: mut Evm) {
-    slot2(base_slot)
-}
-
-/// # Safety
-/// `base_slot..=base_slot + 3` must be the raw position storage range derived
-/// by this module, disjoint from compiler-managed fields.
-#[arithmetic(unchecked)]
-pub unsafe fn tokens_owed0(_ base_slot: u256) -> u128 uses (evm: mut Evm) {
-    (slot3(base_slot) & MASK_U128).downcast_unchecked()
-}
-
-/// # Safety
-/// `base_slot..=base_slot + 3` must be the raw position storage range derived
-/// by this module, disjoint from compiler-managed fields.
-#[arithmetic(unchecked)]
-pub unsafe fn tokens_owed1(_ base_slot: u256) -> u128 uses (evm: mut Evm) {
-    ((slot3(base_slot) >> 128) & MASK_U128).downcast_unchecked()
-}
-
-#[arithmetic(unchecked)]
-unsafe fn store_liquidity(base_slot: u256, value: u128) uses (evm: mut Evm) {
-    evm.sstore(slot: base_slot, value: value as u256)
-}
-
-/// # Safety
-/// `base_slot..=base_slot + 3` must be the raw position storage range derived
-/// by this module, disjoint from compiler-managed fields.
-#[arithmetic(unchecked)]
-pub unsafe fn set_tokens_owed(base_slot: u256, token0: u128, token1: u128)
-uses (evm: mut Evm)
-{
-    evm.sstore(
-        slot: base_slot + 3,
-        value: (token0 as u256) | ((token1 as u256) << 128),
-    )
-}
-
-/// # Safety
-/// `base_slot..=base_slot + 3` must be the raw position storage range derived
-/// by this module, disjoint from compiler-managed fields.
-#[arithmetic(unchecked)]
-pub unsafe fn read_tokens_owed(_ base_slot: u256) -> (u128, u128) uses (evm: mut Evm) {
-    let word = slot3(base_slot)
-    ((word & MASK_U128).downcast_unchecked(), ((word >> 128) & MASK_U128).downcast_unchecked())
-}
-
-/// # Safety
-/// `base_slot..=base_slot + 3` must be the raw position storage range derived
-/// by this module, disjoint from compiler-managed fields.
-#[arithmetic(unchecked)]
-pub unsafe fn read_position(_ base_slot: u256) -> (u128, u256, u256, u128, u128)
-uses (evm: mut Evm)
-{
+pub fn read_position(_ info: ref Info) -> (u128, u256, u256, u128, u128) {
     (
-        liquidity(base_slot),
-        fee_growth_inside0_last_x128(base_slot),
-        fee_growth_inside1_last_x128(base_slot),
-        tokens_owed0(base_slot),
-        tokens_owed1(base_slot),
+        (info.liquidity & MASK_U128).downcast_unchecked(),
+        info.fee_growth_inside0_last_x128,
+        info.fee_growth_inside1_last_x128,
+        info.tokens_owed0,
+        info.tokens_owed1,
     )
 }
 
-/// # Safety
-/// `base_slot..=base_slot + 3` must be the raw position storage range derived
-/// by this module, disjoint from compiler-managed fields.
 #[arithmetic(unchecked)]
-pub unsafe fn update(
-    base_slot: u256,
+pub fn update(
+    _ info: mut Info,
     liquidity_delta: i128,
     fee_growth_inside0_x128: u256,
     fee_growth_inside1_x128: u256,
     principal_owed0_delta: u128,
     principal_owed1_delta: u128,
-)
-uses (evm: mut Evm)
-{
-    let liquidity_before = liquidity(base_slot)
-    let fee_growth_inside0_last_x128_before = fee_growth_inside0_last_x128(base_slot)
-    let fee_growth_inside1_last_x128_before = fee_growth_inside1_last_x128(base_slot)
-    let tokens_owed_word = slot3(base_slot)
-    let tokens_owed0_before: u128 = (tokens_owed_word & MASK_U128).downcast_unchecked()
-    let tokens_owed1_before: u128 = ((tokens_owed_word >> 128) & MASK_U128).downcast_unchecked()
+) {
+    let liquidity_before: u128 = (info.liquidity & MASK_U128).downcast_unchecked()
+    let fee_growth_inside0_last_x128_before = info.fee_growth_inside0_last_x128
+    let fee_growth_inside1_last_x128_before = info.fee_growth_inside1_last_x128
+    let tokens_owed0_before = info.tokens_owed0
+    let tokens_owed1_before = info.tokens_owed1
 
     let liquidity_next = if liquidity_delta == 0 {
-        require_short(
-            mut evm,
-            condition: liquidity_before > 0,
-            code: MSG_NP,
-            len: 2,
-        )
+        require_short(condition: liquidity_before > 0, code: MSG_NP, len: 2)
         liquidity_before
     } else {
         add_delta(liquidity_before, liquidity_delta)
@@ -209,19 +93,16 @@ uses (evm: mut Evm)
         .downcast_unchecked()
 
     if liquidity_delta != 0 {
-        store_liquidity(base_slot, value: liquidity_next)
+        info.liquidity = liquidity_next as u256
     }
-    evm.sstore(slot: base_slot + 1, value: fee_growth_inside0_x128)
-    evm.sstore(slot: base_slot + 2, value: fee_growth_inside1_x128)
+    info.fee_growth_inside0_last_x128 = fee_growth_inside0_x128
+    info.fee_growth_inside1_last_x128 = fee_growth_inside1_x128
 
     let total_tokens_owed0_delta = fee_tokens_owed0_delta + principal_owed0_delta
     let total_tokens_owed1_delta = fee_tokens_owed1_delta + principal_owed1_delta
 
     if total_tokens_owed0_delta > 0 || total_tokens_owed1_delta > 0 {
-        set_tokens_owed(
-            base_slot,
-            token0: tokens_owed0_before + total_tokens_owed0_delta,
-            token1: tokens_owed1_before + total_tokens_owed1_delta,
-        )
+        info.tokens_owed0 = tokens_owed0_before + total_tokens_owed0_delta
+        info.tokens_owed1 = tokens_owed1_before + total_tokens_owed1_delta
     }
 }

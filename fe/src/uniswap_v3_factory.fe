@@ -1,20 +1,20 @@
-// Storage is managed explicitly: deployment parameters at slots 0..3, owner
-// at 4, and mappings salted with 5 and 6. The sole declared field, original,
-// is immutable and code-backed, so raw storage does not alias a field.
-use core::ptr::{self, MemSpan}
-use super::libraries::mem::{at, span}
+use std::evm::encode_abi_payload
+use core::ptr::MemSpan
 use std::abi::sol::{self, Int24, Uint24}
-use std::evm::{Address, Create, Ctx, Evm, Log, RawMem, RawStorage}
+use std::evm::{Address, Create, Ctx, Evm, Log, RawMem, StorageMap}
 use super::libraries::tick_bitmap::int_key
 use super::uniswap_v3_pool::UniswapV3Pool
 
-const PARAMETERS_FACTORY_SLOT: u256 = 0
-const PARAMETERS_TOKEN0_SLOT: u256 = 1
-const PARAMETERS_TOKEN1_SLOT: u256 = 2
-const PARAMETERS_PACKED_SLOT: u256 = 3
-const OWNER_SLOT: u256 = 4
-const FEE_AMOUNT_TICK_SPACING_SLOT: u256 = 5
-const GET_POOL_SLOT: u256 = 6
+// Full words retain the existing slots 0..4; the declared maps reserve roots 5 and 6.
+struct FactoryStore {
+    factory: u256,
+    token0: u256,
+    token1: u256,
+    parameters: u256,
+    owner: u256,
+    fees: StorageMap<u256, u256>,
+    pools: StorageMap<u256, StorageMap<u256, StorageMap<u256, u256>>>,
+}
 
 const MASK_U24: u256 = 0xffffff
 const MASK_U160: u256 = 0xffffffffffffffffffffffffffffffffffffffff
@@ -41,63 +41,26 @@ fn decode_int24(_ word: u256) -> i32 {
     0 - magnitude_i
 }
 
-fn address_at(_ slot: u256) -> Address uses (evm: Evm) {
-    Address { inner: unsafe { evm.sload(slot) } & MASK_U160 }
-}
-
-fn store_address(slot: u256, value: Address) uses (evm: mut Evm) {
-    unsafe {
-        evm.sstore(slot: slot, value: value.inner)
-    }
-}
-
-fn mapping_slot(key: u256, slot: u256) -> u256 uses (evm: mut Evm) {
-    // SAFETY: Raw word accesses and views below stay within this 64-byte allocation.
-    let ptr = ptr::alloc_bytes(64)
-    unsafe {
-        evm.mstore(addr: ptr, value: key)
-        evm.mstore(addr: at(ptr, 32), value: slot)
-    }
-    evm.keccak256(data: unsafe { span(ptr, 64) })
-}
-
-fn fee_amount_tick_spacing_slot(_ fee: Uint24) -> u256 uses (evm: mut Evm) {
-    mapping_slot(key: fee.val as u256, slot: FEE_AMOUNT_TICK_SPACING_SLOT)
-}
-
-fn get_pool_slot(token0: Address, token1: Address, fee: Uint24) -> u256
-uses (evm: mut Evm)
-{
-    let token0_slot = mapping_slot(key: token0.inner, slot: GET_POOL_SLOT)
-    let token1_slot = mapping_slot(key: token1.inner, slot: token0_slot)
-    mapping_slot(key: fee.val as u256, slot: token1_slot)
-}
-
-fn fee_amount_tick_spacing(_ fee: Uint24) -> Int24 uses (evm: mut Evm) {
-    Int24 { val: decode_int24(unsafe { evm.sload(fee_amount_tick_spacing_slot(fee)) }) }
+fn fee_amount_tick_spacing(_ fee: Uint24) -> Int24 uses (store: FactoryStore) {
+    Int24 { val: decode_int24(store.fees[fee.val as u256]) }
 }
 
 fn set_fee_amount_tick_spacing(fee: Uint24, tick_spacing: Int24)
-uses (evm: mut Evm)
+uses (store: mut FactoryStore)
 {
-    unsafe {
-        evm.sstore(
-            slot: fee_amount_tick_spacing_slot(fee),
-            value: int24_word(tick_spacing.val),
-        )
-    }
+    store.fees[fee.val as u256] = int24_word(tick_spacing.val)
 }
 
 fn get_pool(token0: Address, token1: Address, fee: Uint24) -> Address
-uses (evm: mut Evm)
+uses (store: FactoryStore)
 {
-    address_at(get_pool_slot(token0, token1, fee))
+    Address { inner: store.pools[token0.inner][token1.inner][fee.val as u256] & MASK_U160 }
 }
 
 fn set_pool(token0: Address, token1: Address, fee: Uint24, pool: Address)
-uses (evm: mut Evm)
+uses (store: mut FactoryStore)
 {
-    store_address(slot: get_pool_slot(token0, token1, fee), value: pool)
+    store.pools[token0.inner][token1.inner][fee.val as u256] = pool.inner
 }
 
 fn set_parameters(
@@ -107,39 +70,26 @@ fn set_parameters(
     fee: Uint24,
     tick_spacing: Int24,
 )
-uses (evm: mut Evm)
+uses (store: mut FactoryStore)
 {
-    store_address(slot: PARAMETERS_FACTORY_SLOT, value: factory)
-    store_address(slot: PARAMETERS_TOKEN0_SLOT, value: token0)
-    store_address(slot: PARAMETERS_TOKEN1_SLOT, value: token1)
-    unsafe {
-        evm.sstore(
-            slot: PARAMETERS_PACKED_SLOT,
-            value: (fee.val as u256) | (int24_word(tick_spacing.val) << 24),
-        )
-    }
+    store.factory = factory.inner
+    store.token0 = token0.inner
+    store.token1 = token1.inner
+    store.parameters = (fee.val as u256) | (int24_word(tick_spacing.val) << 24)
 }
 
-fn clear_parameters() uses (evm: mut Evm) {
-    unsafe {
-        evm.sstore(slot: PARAMETERS_FACTORY_SLOT, value: 0)
-        evm.sstore(slot: PARAMETERS_TOKEN0_SLOT, value: 0)
-        evm.sstore(slot: PARAMETERS_TOKEN1_SLOT, value: 0)
-        evm.sstore(slot: PARAMETERS_PACKED_SLOT, value: 0)
-    }
+fn clear_parameters() uses (store: mut FactoryStore) {
+    store.factory = 0
+    store.token0 = 0
+    store.token1 = 0
+    store.parameters = 0
 }
 
 fn pool_salt(token0: Address, token1: Address, fee: Uint24) -> u256
 uses (evm: mut Evm)
 {
-    // SAFETY: Raw word accesses and views below stay within this 96-byte allocation.
-    let ptr = ptr::alloc_bytes(96)
-    unsafe {
-        evm.mstore(addr: ptr, value: token0.inner)
-        evm.mstore(addr: at(ptr, 32), value: token1.inner)
-        evm.mstore(addr: at(ptr, 64), value: fee.val as u256)
-    }
-    evm.keccak256(data: unsafe { span(ptr, 96) })
+    let ptr = encode_abi_payload((token0.inner, token1.inner, fee.val as u256))
+    evm.keccak256(data: ptr.span().head(96))
 }
 
 fn check_not_delegate_call(_ original: Address) uses (ctx: Ctx) {
@@ -177,16 +127,9 @@ fn emit_pool_created(
 )
 uses (evm: mut Evm)
 {
-    // SAFETY: Raw word accesses and views below stay within this 64-byte allocation.
-    let ptr = ptr::alloc_bytes(64)
-    unsafe {
-        evm.mstore(addr: ptr, value: int24_abi_word(tick_spacing.val))
-        evm.mstore(addr: at(ptr, 32), value: pool.inner)
-    }
+    let ptr = encode_abi_payload((int24_abi_word(tick_spacing.val), pool.inner))
     evm.log4(
-        data: unsafe {
-            span(ptr, 64)
-        },
+        data: ptr.span().head(64),
         topic0: POOL_CREATED_TOPIC,
         topic1: token0.inner,
         topic2: token1.inner,
@@ -219,13 +162,14 @@ msg UniswapV3FactoryMsg {
 
 pub contract UniswapV3Factory uses (ctx: Ctx, evm: mut Evm) {
     original: Address,
+    mut store: FactoryStore,
 
     init()
-    uses (ctx, mut evm, mut original)
+    uses (ctx, mut evm, mut original, mut store)
     {
         original = ctx.address()
         let owner = ctx.caller()
-        store_address(slot: OWNER_SLOT, value: owner)
+        store.owner = owner.inner
         emit_owner_changed(old_owner: Address::zero(), new_owner: owner)
         set_fee_amount_tick_spacing(fee: Uint24 { val: 500 }, tick_spacing: Int24 { val: 10 })
         emit_fee_amount_enabled(fee: Uint24 { val: 500 }, tick_spacing: Int24 { val: 10 })
@@ -243,31 +187,31 @@ pub contract UniswapV3Factory uses (ctx: Ctx, evm: mut Evm) {
 
     recv UniswapV3FactoryMsg {
         Parameters -> (u256, u256, u256, u32, i32)
-        uses (evm)
+        uses (store)
         {
             (
-                address_at(PARAMETERS_FACTORY_SLOT).inner,
-                address_at(PARAMETERS_TOKEN0_SLOT).inner,
-                address_at(PARAMETERS_TOKEN1_SLOT).inner,
-                (unsafe { evm.sload(PARAMETERS_PACKED_SLOT) } & MASK_U24).downcast_unchecked(),
-                decode_int24(unsafe { evm.sload(PARAMETERS_PACKED_SLOT) } >> 24),
+                store.factory & MASK_U160,
+                store.token0 & MASK_U160,
+                store.token1 & MASK_U160,
+                (store.parameters & MASK_U24).downcast_unchecked(),
+                decode_int24(store.parameters >> 24),
             )
         }
 
-        Owner -> u256 uses (evm) {
-            address_at(OWNER_SLOT).inner
+        Owner -> u256 uses (store) {
+            store.owner & MASK_U160
         }
 
-        FeeAmountTickSpacing { fee } -> i32 uses (mut evm) {
+        FeeAmountTickSpacing { fee } -> i32 uses (store) {
             fee_amount_tick_spacing(fee).val
         }
 
-        GetPool { tokenA, tokenB, fee } -> u256 uses (mut evm) {
+        GetPool { tokenA, tokenB, fee } -> u256 uses (store) {
             get_pool(token0: tokenA, token1: tokenB, fee).inner
         }
 
         CreatePool { tokenA, tokenB, fee } -> u256
-        uses (ctx, mut evm, original)
+        uses (ctx, mut evm, original, mut store)
         {
             check_not_delegate_call(original)
             assert(tokenA != tokenB)
@@ -279,8 +223,7 @@ pub contract UniswapV3Factory uses (ctx: Ctx, evm: mut Evm) {
             assert(token0 != Address::zero())
             let tick_spacing = fee_amount_tick_spacing(fee)
             assert(tick_spacing.val != 0)
-            let pool_slot = get_pool_slot(token0, token1, fee)
-            assert(address_at(pool_slot) == Address::zero())
+            assert(get_pool(token0, token1, fee) == Address::zero())
             set_parameters(
                 factory: ctx.address(),
                 token0,
@@ -292,29 +235,26 @@ pub contract UniswapV3Factory uses (ctx: Ctx, evm: mut Evm) {
                 .create2<UniswapV3Pool>(value: 0, args: (), salt: pool_salt(token0, token1, fee))
             assert(pool.inner != 0)
             clear_parameters()
-            store_address(slot: pool_slot, value: pool)
+            set_pool(token0, token1, fee, pool)
             set_pool(token0: token1, token1: token0, fee, pool)
             emit_pool_created(token0, token1, fee, tick_spacing: tick_spacing, pool)
             pool.inner
         }
 
-        SetOwner { owner } uses (ctx, mut evm) {
-            let old_owner = address_at(OWNER_SLOT)
+        SetOwner { owner } uses (ctx, mut evm, mut store) {
+            let old_owner = Address { inner: store.owner & MASK_U160 }
             assert(ctx.caller() == old_owner)
             emit_owner_changed(old_owner: old_owner, new_owner: owner)
-            store_address(slot: OWNER_SLOT, value: owner)
+            store.owner = owner.inner
         }
 
-        EnableFeeAmount { fee, tickSpacing } uses (ctx, mut evm) {
-            assert(ctx.caller() == address_at(OWNER_SLOT))
+        EnableFeeAmount { fee, tickSpacing } uses (ctx, mut evm, mut store) {
+            assert(ctx.caller().inner == store.owner & MASK_U160)
             assert(fee.val < 1000000)
             let tick_spacing = tickSpacing.val
             assert(tick_spacing > 0 && tick_spacing < 16384)
-            let fee_slot = fee_amount_tick_spacing_slot(fee)
-            assert(unsafe { evm.sload(fee_slot) } == 0)
-            unsafe {
-                evm.sstore(slot: fee_slot, value: int24_word(tick_spacing))
-            }
+            assert(store.fees[fee.val as u256] == 0)
+            store.fees[fee.val as u256] = int24_word(tick_spacing)
             emit_fee_amount_enabled(fee, tick_spacing: tickSpacing)
         }
     }

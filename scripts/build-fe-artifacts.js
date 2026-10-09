@@ -834,6 +834,13 @@ const abiOverrides = {
     },
     {
       type: 'function',
+      name: 'tickBitmap',
+      inputs: [{ name: '', type: 'int16' }],
+      outputs: [{ name: '', type: 'uint256' }],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
       name: 'positions',
       inputs: [{ name: 'key', type: 'bytes32' }],
       outputs: [
@@ -1303,17 +1310,9 @@ const mockOnlyPoolFunctionNames = new Set([
   'setFeeGrowthGlobal1X128',
 ])
 
-abiOverrides.UniswapV3Pool = abiOverrides.MockTimeUniswapV3Pool
-  .filter(({ type, name }) => type !== 'function' || !mockOnlyPoolFunctionNames.has(name))
-  .concat([
-    {
-      type: 'function',
-      name: 'tickBitmap',
-      inputs: [{ name: '', type: 'int16' }],
-      outputs: [{ name: '', type: 'uint256' }],
-      stateMutability: 'view',
-    },
-  ])
+abiOverrides.UniswapV3Pool = abiOverrides.MockTimeUniswapV3Pool.filter(
+  ({ type, name }) => type !== 'function' || !mockOnlyPoolFunctionNames.has(name)
+)
 
 function prefixedHex(hex) {
   const trimmed = hex.trim()

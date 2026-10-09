@@ -1,7 +1,6 @@
-use core::ptr
-use super::libraries::mem::{at, span}
+use std::evm::encode_abi_payload
 use std::abi::sol
-use std::evm::{Address, Ctx, Evm, RawMem, StorageMap}
+use std::evm::{Address, Ctx, Evm, StorageMap}
 
 const TRANSFER_TOPIC: u256 = 0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef
 const APPROVAL_TOPIC: u256 = 0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925
@@ -32,15 +31,9 @@ struct TestERC20Store {
 }
 
 fn emit_transfer(from: Address, to: Address, amount: u256) uses (evm: mut Evm) {
-    // SAFETY: Raw word accesses and views below stay within this 32-byte allocation.
-    let ptr = ptr::alloc_bytes(32)
-    unsafe {
-        evm.mstore(addr: ptr, value: amount)
-    }
+    let ptr = encode_abi_payload((amount,))
     evm.log3(
-        data: unsafe {
-            span(ptr, 32)
-        },
+        data: ptr.span().head(32),
         topic0: TRANSFER_TOPIC,
         topic1: from.inner,
         topic2: to.inner,
@@ -50,15 +43,9 @@ fn emit_transfer(from: Address, to: Address, amount: u256) uses (evm: mut Evm) {
 fn emit_approval(owner: Address, spender: Address, amount: u256)
 uses (evm: mut Evm)
 {
-    // SAFETY: Raw word accesses and views below stay within this 32-byte allocation.
-    let ptr = ptr::alloc_bytes(32)
-    unsafe {
-        evm.mstore(addr: ptr, value: amount)
-    }
+    let ptr = encode_abi_payload((amount,))
     evm.log3(
-        data: unsafe {
-            span(ptr, 32)
-        },
+        data: ptr.span().head(32),
         topic0: APPROVAL_TOPIC,
         topic1: owner.inner,
         topic2: spender.inner,
