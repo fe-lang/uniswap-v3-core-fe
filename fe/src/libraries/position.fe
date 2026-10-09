@@ -22,20 +22,26 @@ fn checked_int24_word(_ value: i256) -> u256 {
 pub fn position_key(owner: Address, tick_lower: i256, tick_upper: i256) -> u256
 uses (evm: mut Evm)
 {
+    // SAFETY: Raw word accesses and views below stay within this 32-byte allocation.
     let ptr = ptr::alloc_bytes(32)
     let word = (owner.inner << 96)
         | (checked_int24_word(tick_lower) << 72)
         | (checked_int24_word(tick_upper) << 48)
-    evm.mstore(addr: ptr, value: word)
-    evm.keccak256(data: span(ptr, 26))
+    unsafe {
+        evm.mstore(addr: ptr, value: word)
+    }
+    evm.keccak256(data: unsafe { span(ptr, 26) })
 }
 
 #[arithmetic(unchecked)]
 pub fn mapping_slot(key: u256, positions_slot: u256) -> u256 uses (evm: mut Evm) {
+    // SAFETY: Raw word accesses and views below stay within this 64-byte allocation.
     let ptr = ptr::alloc_bytes(64)
-    evm.mstore(addr: ptr, value: key)
-    evm.mstore(addr: at(ptr, 32), value: positions_slot)
-    evm.keccak256(data: span(ptr, 64))
+    unsafe {
+        evm.mstore(addr: ptr, value: key)
+        evm.mstore(addr: at(ptr, 32), value: positions_slot)
+    }
+    evm.keccak256(data: unsafe { span(ptr, 64) })
 }
 
 #[arithmetic(unchecked)]
@@ -54,57 +60,75 @@ uses (evm: mut Evm)
 }
 
 #[arithmetic(unchecked)]
-fn slot0(_ base_slot: u256) -> u256 uses (evm: mut Evm) {
+unsafe fn slot0(_ base_slot: u256) -> u256 uses (evm: mut Evm) {
     evm.sload(base_slot)
 }
 
 #[arithmetic(unchecked)]
-fn slot1(_ base_slot: u256) -> u256 uses (evm: mut Evm) {
+unsafe fn slot1(_ base_slot: u256) -> u256 uses (evm: mut Evm) {
     evm.sload(base_slot + 1)
 }
 
 #[arithmetic(unchecked)]
-fn slot2(_ base_slot: u256) -> u256 uses (evm: mut Evm) {
+unsafe fn slot2(_ base_slot: u256) -> u256 uses (evm: mut Evm) {
     evm.sload(base_slot + 2)
 }
 
 #[arithmetic(unchecked)]
-fn slot3(_ base_slot: u256) -> u256 uses (evm: mut Evm) {
+unsafe fn slot3(_ base_slot: u256) -> u256 uses (evm: mut Evm) {
     evm.sload(base_slot + 3)
 }
 
+/// # Safety
+/// `base_slot..=base_slot + 3` must be the raw position storage range derived
+/// by this module, disjoint from compiler-managed fields.
 #[arithmetic(unchecked)]
-pub fn liquidity(_ base_slot: u256) -> u128 uses (evm: mut Evm) {
+pub unsafe fn liquidity(_ base_slot: u256) -> u128 uses (evm: mut Evm) {
     (slot0(base_slot) & MASK_U128).downcast_unchecked()
 }
 
+/// # Safety
+/// `base_slot..=base_slot + 3` must be the raw position storage range derived
+/// by this module, disjoint from compiler-managed fields.
 #[arithmetic(unchecked)]
-pub fn fee_growth_inside0_last_x128(_ base_slot: u256) -> u256 uses (evm: mut Evm) {
+pub unsafe fn fee_growth_inside0_last_x128(_ base_slot: u256) -> u256 uses (evm: mut Evm) {
     slot1(base_slot)
 }
 
+/// # Safety
+/// `base_slot..=base_slot + 3` must be the raw position storage range derived
+/// by this module, disjoint from compiler-managed fields.
 #[arithmetic(unchecked)]
-pub fn fee_growth_inside1_last_x128(_ base_slot: u256) -> u256 uses (evm: mut Evm) {
+pub unsafe fn fee_growth_inside1_last_x128(_ base_slot: u256) -> u256 uses (evm: mut Evm) {
     slot2(base_slot)
 }
 
+/// # Safety
+/// `base_slot..=base_slot + 3` must be the raw position storage range derived
+/// by this module, disjoint from compiler-managed fields.
 #[arithmetic(unchecked)]
-pub fn tokens_owed0(_ base_slot: u256) -> u128 uses (evm: mut Evm) {
+pub unsafe fn tokens_owed0(_ base_slot: u256) -> u128 uses (evm: mut Evm) {
     (slot3(base_slot) & MASK_U128).downcast_unchecked()
 }
 
+/// # Safety
+/// `base_slot..=base_slot + 3` must be the raw position storage range derived
+/// by this module, disjoint from compiler-managed fields.
 #[arithmetic(unchecked)]
-pub fn tokens_owed1(_ base_slot: u256) -> u128 uses (evm: mut Evm) {
+pub unsafe fn tokens_owed1(_ base_slot: u256) -> u128 uses (evm: mut Evm) {
     ((slot3(base_slot) >> 128) & MASK_U128).downcast_unchecked()
 }
 
 #[arithmetic(unchecked)]
-fn store_liquidity(base_slot: u256, value: u128) uses (evm: mut Evm) {
+unsafe fn store_liquidity(base_slot: u256, value: u128) uses (evm: mut Evm) {
     evm.sstore(slot: base_slot, value: value as u256)
 }
 
+/// # Safety
+/// `base_slot..=base_slot + 3` must be the raw position storage range derived
+/// by this module, disjoint from compiler-managed fields.
 #[arithmetic(unchecked)]
-pub fn set_tokens_owed(base_slot: u256, token0: u128, token1: u128)
+pub unsafe fn set_tokens_owed(base_slot: u256, token0: u128, token1: u128)
 uses (evm: mut Evm)
 {
     evm.sstore(
@@ -113,14 +137,20 @@ uses (evm: mut Evm)
     )
 }
 
+/// # Safety
+/// `base_slot..=base_slot + 3` must be the raw position storage range derived
+/// by this module, disjoint from compiler-managed fields.
 #[arithmetic(unchecked)]
-pub fn read_tokens_owed(_ base_slot: u256) -> (u128, u128) uses (evm: mut Evm) {
+pub unsafe fn read_tokens_owed(_ base_slot: u256) -> (u128, u128) uses (evm: mut Evm) {
     let word = slot3(base_slot)
     ((word & MASK_U128).downcast_unchecked(), ((word >> 128) & MASK_U128).downcast_unchecked())
 }
 
+/// # Safety
+/// `base_slot..=base_slot + 3` must be the raw position storage range derived
+/// by this module, disjoint from compiler-managed fields.
 #[arithmetic(unchecked)]
-pub fn read_position(_ base_slot: u256) -> (u128, u256, u256, u128, u128)
+pub unsafe fn read_position(_ base_slot: u256) -> (u128, u256, u256, u128, u128)
 uses (evm: mut Evm)
 {
     (
@@ -132,8 +162,11 @@ uses (evm: mut Evm)
     )
 }
 
+/// # Safety
+/// `base_slot..=base_slot + 3` must be the raw position storage range derived
+/// by this module, disjoint from compiler-managed fields.
 #[arithmetic(unchecked)]
-pub fn update(
+pub unsafe fn update(
     base_slot: u256,
     liquidity_delta: i128,
     fee_growth_inside0_x128: u256,

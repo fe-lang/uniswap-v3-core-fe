@@ -48,10 +48,13 @@ fn as_address(_ value: u256) -> Address {
 }
 
 fn address_payload(_ sender: Address) -> Bytes uses (evm: mut Evm) {
+    // SAFETY: Raw word accesses and views below stay within this 64-byte allocation.
     let ptr = ptr::alloc_bytes(64)
-    evm.mstore(addr: ptr, value: 32)
-    evm.mstore(addr: at(ptr, 32), value: sender.inner)
-    Bytes::from_abi_tail(data: ptr, len: 32, size: 64)
+    unsafe {
+        evm.mstore(addr: ptr, value: 32)
+        evm.mstore(addr: at(ptr, 32), value: sender.inner)
+        Bytes::from_abi_tail(data: ptr, len: 32, size: 64)
+    }
 }
 
 fn decode_sender(_ data: Bytes) -> Address uses (evm: Evm) {

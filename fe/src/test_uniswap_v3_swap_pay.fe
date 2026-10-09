@@ -52,12 +52,15 @@ fn as_address(_ value: u256) -> Address {
 fn swap_payload(sender: Address, pay0: u256, pay1: u256) -> Bytes
 uses (evm: mut Evm)
 {
+    // SAFETY: Raw word accesses and views below stay within this 128-byte allocation.
     let ptr = ptr::alloc_bytes(128)
-    evm.mstore(addr: ptr, value: 96)
-    evm.mstore(addr: at(ptr, 32), value: sender.inner)
-    evm.mstore(addr: at(ptr, 64), value: pay0)
-    evm.mstore(addr: at(ptr, 96), value: pay1)
-    Bytes::from_abi_tail(data: ptr, len: 96, size: 128)
+    unsafe {
+        evm.mstore(addr: ptr, value: 96)
+        evm.mstore(addr: at(ptr, 32), value: sender.inner)
+        evm.mstore(addr: at(ptr, 64), value: pay0)
+        evm.mstore(addr: at(ptr, 96), value: pay1)
+        Bytes::from_abi_tail(data: ptr, len: 96, size: 128)
+    }
 }
 
 fn token0(_ pool: Address) -> Address uses (evm: mut Evm) {

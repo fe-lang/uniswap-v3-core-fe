@@ -41,11 +41,12 @@ fn raw_call_expect_lok(pool: Address, args: MemSpan) uses (evm: mut Evm) {
     assert(!outcome.success())
     assert(outcome.returndata_len() == 100)
 
+    // SAFETY: The preceding returndata-length check covers every word read below.
     let ptr = ret.ptr()
-    assert(evm.mload(ptr) >> 224 == ERROR_SELECTOR)
-    assert(evm.mload(at(ptr, 4)) == 32)
-    assert(evm.mload(at(ptr, 36)) == 3)
-    assert(evm.mload(at(ptr, 68)) == ERROR_LOK_WORD)
+    assert(unsafe { evm.mload(ptr) } >> 224 == ERROR_SELECTOR)
+    assert(unsafe { evm.mload(at(ptr, 4)) } == 32)
+    assert(unsafe { evm.mload(at(ptr, 36)) } == 3)
+    assert(unsafe { evm.mload(at(ptr, 68)) } == ERROR_LOK_WORD)
 }
 
 pub contract TestUniswapV3ReentrantCallee uses (ctx: Ctx, evm: mut Evm) {
@@ -97,60 +98,78 @@ pub contract TestUniswapV3ReentrantCallee uses (ctx: Ctx, evm: mut Evm) {
 }
 
 fn check_locked_entrypoints(pool: Address) uses (evm: mut Evm) {
+    // SAFETY: Raw word accesses and views below stay within this 196-byte allocation.
     let swap_ptr = ptr::alloc_bytes(196)
-    evm.mstore(addr: swap_ptr, value: (0x128acb08 as u256) << 224)
-    evm.mstore(addr: at(swap_ptr, 4), value: 0)
-    evm.mstore(addr: at(swap_ptr, 36), value: 0)
-    evm.mstore(addr: at(swap_ptr, 68), value: 1)
-    evm.mstore(addr: at(swap_ptr, 100), value: 0)
-    evm.mstore(addr: at(swap_ptr, 132), value: 160)
-    evm.mstore(addr: at(swap_ptr, 164), value: 0)
-    raw_call_expect_lok(pool, args: span(swap_ptr, 196))
+    unsafe {
+        evm.mstore(addr: swap_ptr, value: (0x128acb08 as u256) << 224)
+        evm.mstore(addr: at(swap_ptr, 4), value: 0)
+        evm.mstore(addr: at(swap_ptr, 36), value: 0)
+        evm.mstore(addr: at(swap_ptr, 68), value: 1)
+        evm.mstore(addr: at(swap_ptr, 100), value: 0)
+        evm.mstore(addr: at(swap_ptr, 132), value: 160)
+        evm.mstore(addr: at(swap_ptr, 164), value: 0)
+    }
+    raw_call_expect_lok(pool, args: unsafe { span(swap_ptr, 196) })
 
+    // SAFETY: Raw word accesses and views below stay within this 196-byte allocation.
     let mint_ptr = ptr::alloc_bytes(196)
-    evm.mstore(addr: mint_ptr, value: (0x3c8a7d8d as u256) << 224)
-    evm.mstore(addr: at(mint_ptr, 4), value: 0)
-    evm.mstore(addr: at(mint_ptr, 36), value: 0)
-    evm.mstore(addr: at(mint_ptr, 68), value: 0)
-    evm.mstore(addr: at(mint_ptr, 100), value: 0)
-    evm.mstore(addr: at(mint_ptr, 132), value: 160)
-    evm.mstore(addr: at(mint_ptr, 164), value: 0)
-    raw_call_expect_lok(pool, args: span(mint_ptr, 196))
+    unsafe {
+        evm.mstore(addr: mint_ptr, value: (0x3c8a7d8d as u256) << 224)
+        evm.mstore(addr: at(mint_ptr, 4), value: 0)
+        evm.mstore(addr: at(mint_ptr, 36), value: 0)
+        evm.mstore(addr: at(mint_ptr, 68), value: 0)
+        evm.mstore(addr: at(mint_ptr, 100), value: 0)
+        evm.mstore(addr: at(mint_ptr, 132), value: 160)
+        evm.mstore(addr: at(mint_ptr, 164), value: 0)
+    }
+    raw_call_expect_lok(pool, args: unsafe { span(mint_ptr, 196) })
 
+    // SAFETY: Raw word accesses and views below stay within this 164-byte allocation.
     let collect_ptr = ptr::alloc_bytes(164)
-    evm.mstore(addr: collect_ptr, value: (0x4f1eb3d8 as u256) << 224)
-    evm.mstore(addr: at(collect_ptr, 4), value: 0)
-    evm.mstore(addr: at(collect_ptr, 36), value: 0)
-    evm.mstore(addr: at(collect_ptr, 68), value: 0)
-    evm.mstore(addr: at(collect_ptr, 100), value: 0)
-    evm.mstore(addr: at(collect_ptr, 132), value: 0)
-    raw_call_expect_lok(pool, args: span(collect_ptr, 164))
+    unsafe {
+        evm.mstore(addr: collect_ptr, value: (0x4f1eb3d8 as u256) << 224)
+        evm.mstore(addr: at(collect_ptr, 4), value: 0)
+        evm.mstore(addr: at(collect_ptr, 36), value: 0)
+        evm.mstore(addr: at(collect_ptr, 68), value: 0)
+        evm.mstore(addr: at(collect_ptr, 100), value: 0)
+        evm.mstore(addr: at(collect_ptr, 132), value: 0)
+    }
+    raw_call_expect_lok(pool, args: unsafe { span(collect_ptr, 164) })
 
+    // SAFETY: Raw word accesses and views below stay within this 100-byte allocation.
     let burn_ptr = ptr::alloc_bytes(100)
-    evm.mstore(addr: burn_ptr, value: (0xa34123a7 as u256) << 224)
-    evm.mstore(addr: at(burn_ptr, 4), value: 0)
-    evm.mstore(addr: at(burn_ptr, 36), value: 0)
-    evm.mstore(addr: at(burn_ptr, 68), value: 0)
-    raw_call_expect_lok(pool, args: span(burn_ptr, 100))
+    unsafe {
+        evm.mstore(addr: burn_ptr, value: (0xa34123a7 as u256) << 224)
+        evm.mstore(addr: at(burn_ptr, 4), value: 0)
+        evm.mstore(addr: at(burn_ptr, 36), value: 0)
+        evm.mstore(addr: at(burn_ptr, 68), value: 0)
+    }
+    raw_call_expect_lok(pool, args: unsafe { span(burn_ptr, 100) })
 
+    // SAFETY: Raw word accesses and views below stay within this 164-byte allocation.
     let flash_ptr = ptr::alloc_bytes(164)
-    evm.mstore(addr: flash_ptr, value: (0x490e6cbc as u256) << 224)
-    evm.mstore(addr: at(flash_ptr, 4), value: 0)
-    evm.mstore(addr: at(flash_ptr, 36), value: 0)
-    evm.mstore(addr: at(flash_ptr, 68), value: 0)
-    evm.mstore(addr: at(flash_ptr, 100), value: 128)
-    evm.mstore(addr: at(flash_ptr, 132), value: 0)
-    raw_call_expect_lok(pool, args: span(flash_ptr, 164))
+    unsafe {
+        evm.mstore(addr: flash_ptr, value: (0x490e6cbc as u256) << 224)
+        evm.mstore(addr: at(flash_ptr, 4), value: 0)
+        evm.mstore(addr: at(flash_ptr, 36), value: 0)
+        evm.mstore(addr: at(flash_ptr, 68), value: 0)
+        evm.mstore(addr: at(flash_ptr, 100), value: 128)
+        evm.mstore(addr: at(flash_ptr, 132), value: 0)
+    }
+    raw_call_expect_lok(pool, args: unsafe { span(flash_ptr, 164) })
 
+    // SAFETY: Raw word accesses and views below stay within this 100-byte allocation.
     let collect_protocol_ptr = ptr::alloc_bytes(100)
-    evm.mstore(
-        addr: collect_protocol_ptr,
-        value: (0x85b66729 as u256) << 224,
-    )
-    evm.mstore(addr: at(collect_protocol_ptr, 4), value: 0)
-    evm.mstore(addr: at(collect_protocol_ptr, 36), value: 0)
-    evm.mstore(addr: at(collect_protocol_ptr, 68), value: 0)
-    raw_call_expect_lok(pool, args: span(collect_protocol_ptr, 100))
+    unsafe {
+        evm.mstore(
+            addr: collect_protocol_ptr,
+            value: (0x85b66729 as u256) << 224,
+        )
+        evm.mstore(addr: at(collect_protocol_ptr, 4), value: 0)
+        evm.mstore(addr: at(collect_protocol_ptr, 36), value: 0)
+        evm.mstore(addr: at(collect_protocol_ptr, 68), value: 0)
+    }
+    raw_call_expect_lok(pool, args: unsafe { span(collect_protocol_ptr, 100) })
 
     assert!(false, "Unable to reenter")
 }

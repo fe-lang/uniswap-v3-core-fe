@@ -1,3 +1,5 @@
+// Raw bitmap words live at keccak256(word position, bitmap salt), outside
+// compiler-managed fields. The test contract has no declared storage fields.
 // Gas measurement entrypoints are disabled until MVS supports core::hint::black_box.
 use core::ptr
 use super::mem::{at, span}
@@ -16,10 +18,13 @@ fn position(_ tick: i256) -> (i256, u256) {
 
 #[arithmetic(unchecked)]
 pub fn word_slot(word_pos: i256, bitmap_slot: u256) -> u256 uses (evm: mut Evm) {
+    // SAFETY: Raw word accesses and views below stay within this 64-byte allocation.
     let ptr = ptr::alloc_bytes(64)
-    evm.mstore(addr: ptr, value: int_key(word_pos))
-    evm.mstore(addr: at(ptr, 32), value: bitmap_slot)
-    evm.keccak256(data: span(ptr, 64))
+    unsafe {
+        evm.mstore(addr: ptr, value: int_key(word_pos))
+        evm.mstore(addr: at(ptr, 32), value: bitmap_slot)
+    }
+    evm.keccak256(data: unsafe { span(ptr, 64) })
 }
 
 #[arithmetic(unchecked)]
@@ -30,7 +35,9 @@ uses (evm: mut Evm)
     let (word_pos, bit_pos) = position(tick / tick_spacing)
     let slot = word_slot(word_pos, bitmap_slot: bitmap_slot)
     let mask = 1 << bit_pos
-    evm.sstore(slot: slot, value: evm.sload(slot) ^ mask)
+    unsafe {
+        evm.sstore(slot: slot, value: evm.sload(slot) ^ mask)
+    }
 }
 
 #[arithmetic(unchecked)]
@@ -51,7 +58,7 @@ uses (evm: mut Evm)
         let (word_pos, bit_pos) = position(compressed)
         let bit = 1 << bit_pos
         let mask = (bit - 1) + bit
-        let masked = evm.sload(word_slot(word_pos, bitmap_slot: bitmap_slot)) & mask
+        let masked = unsafe { evm.sload(word_slot(word_pos, bitmap_slot: bitmap_slot)) } & mask
         if masked != 0 {
             let delta: i256 = (bit_pos - (most_significant_bit(masked) as u256))
                 .downcast_unchecked()
@@ -64,7 +71,7 @@ uses (evm: mut Evm)
 
     let (word_pos, bit_pos) = position(compressed + 1)
     let mask = !((1 << bit_pos) - 1)
-    let masked = evm.sload(word_slot(word_pos, bitmap_slot: bitmap_slot)) & mask
+    let masked = unsafe { evm.sload(word_slot(word_pos, bitmap_slot: bitmap_slot)) } & mask
     if masked != 0 {
         let delta: i256 = ((least_significant_bit(masked) as u256) - bit_pos).downcast_unchecked()
         return ((compressed + 1 + delta) * tick_spacing, true)

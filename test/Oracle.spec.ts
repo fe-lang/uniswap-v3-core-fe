@@ -263,6 +263,59 @@ describe('Oracle', () => {
   })
 
   describe('#observe', () => {
+    describe('malformed calldata', () => {
+      let oracle: OracleTest
+      beforeEach('initialize test oracle', async () => {
+        oracle = await loadFixture(initializedOracleFixture)
+      })
+
+      const word = (value: BigNumberish) => ethers.utils.hexZeroPad(BigNumber.from(value).toHexString(), 32)
+      const malformedArguments = [
+        { name: 'missing offset', args: '0x' },
+        { name: 'missing length', args: word(32) },
+        { name: 'offset beyond calldata', args: ethers.utils.hexConcat([word(96), word(0)]) },
+        {
+          name: 'wrapping offset',
+          args: ethers.utils.hexConcat([word(ethers.constants.MaxUint256.sub(3)), word(0)]),
+        },
+        { name: 'missing element', args: ethers.utils.hexConcat([word(32), word(1)]) },
+        { name: 'truncated element', args: ethers.utils.hexConcat([word(32), word(1), '0x00']) },
+        {
+          name: 'wrapping allocation length',
+          args: ethers.utils.hexConcat([word(32), word(BigNumber.from(2).pow(251))]),
+        },
+      ]
+
+      for (const method of ['observe', 'getGasCostOfObserve']) {
+        it(`${method} accepts an empty array at offset zero`, async () => {
+          const data = ethers.utils.hexConcat([oracle.interface.getSighash(method), word(0)])
+          const result = await ethers.provider.call({ to: oracle.address, data })
+          if (method === 'observe') {
+            const decoded = oracle.interface.decodeFunctionResult('observe', result)
+            expect(decoded[0]).to.deep.eq([])
+            expect(decoded[1]).to.deep.eq([])
+          } else {
+            const [gas] = oracle.interface.decodeFunctionResult('getGasCostOfObserve', result)
+            expect(gas).to.be.gte(0)
+          }
+        })
+
+        for (const { name, args } of malformedArguments) {
+          it(`${method} rejects ${name} before exhausting gas`, async () => {
+            const data = ethers.utils.hexConcat([oracle.interface.getSighash(method), args])
+            const trace = await ethers.provider.send('debug_traceCall', [
+              { to: oracle.address, data, gas: '0x186a0' },
+              'latest',
+              { disableMemory: true, disableStack: true, disableStorage: true },
+            ])
+            expect(trace.failed).to.eq(true)
+            expect(trace.structLogs[trace.structLogs.length - 1].op).to.eq('REVERT')
+            expect(trace.gas).to.be.lt(100000)
+          })
+        }
+      }
+    })
+
     describe('before initialization', async () => {
       let oracle: OracleTest
       beforeEach('deploy test oracle', async () => {

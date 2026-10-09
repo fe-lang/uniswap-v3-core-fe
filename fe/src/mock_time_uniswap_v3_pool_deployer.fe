@@ -1,3 +1,5 @@
+// This contract has no declared storage fields; raw slots 0..3 hold only
+// the temporary parameters consumed while creating a pool.
 use core::ptr
 use super::libraries::mem::{at, span}
 use std::evm::{Address, Create, Evm, Log, RawMem, RawOps, RawStorage}
@@ -20,14 +22,17 @@ fn int24_word(_ value: i32) -> u256 {
 fn pool_salt(token0: Address, token1: Address, fee: u32, tick_spacing: i32) -> u256
 uses (evm: mut Evm)
 {
+    // SAFETY: Raw word accesses and views below stay within this 72-byte allocation.
     let ptr = ptr::alloc_bytes(72)
-    evm.mstore(addr: ptr, value: token0.inner << 96)
-    evm.mstore(addr: at(ptr, 20), value: token1.inner << 96)
-    evm.mstore(
-        addr: at(ptr, 40),
-        value: (((fee as u256) << 24) | int24_word(tick_spacing)) << 208,
-    )
-    evm.keccak256(data: span(ptr, 46))
+    unsafe {
+        evm.mstore(addr: ptr, value: token0.inner << 96)
+        evm.mstore(addr: at(ptr, 20), value: token1.inner << 96)
+        evm.mstore(
+            addr: at(ptr, 40),
+            value: (((fee as u256) << 24) | int24_word(tick_spacing)) << 208,
+        )
+    }
+    evm.keccak256(data: unsafe { span(ptr, 46) })
 }
 
 #[arithmetic(unchecked)]
@@ -46,45 +51,62 @@ fn decode_int24_word(_ word: u256) -> i32 {
 fn store_parameters(factory: Address, token0: Address, token1: Address, fee: u32, tick_spacing: i32)
 uses (evm: mut Evm)
 {
-    evm.sstore(slot: PARAMETERS_FACTORY_SLOT, value: factory.inner)
-    evm.sstore(slot: PARAMETERS_TOKEN0_SLOT, value: token0.inner)
-    evm.sstore(slot: PARAMETERS_TOKEN1_SLOT, value: token1.inner)
-    evm.sstore(
-        slot: PARAMETERS_PACKED_SLOT,
-        value: (fee as u256) | (int24_word(tick_spacing) << 24),
-    )
+    unsafe {
+        evm.sstore(slot: PARAMETERS_FACTORY_SLOT, value: factory.inner)
+        evm.sstore(slot: PARAMETERS_TOKEN0_SLOT, value: token0.inner)
+        evm.sstore(slot: PARAMETERS_TOKEN1_SLOT, value: token1.inner)
+        evm.sstore(
+            slot: PARAMETERS_PACKED_SLOT,
+            value: (fee as u256) | (int24_word(tick_spacing) << 24),
+        )
+    }
 }
 
 fn clear_parameters() uses (evm: mut Evm) {
-    evm.sstore(slot: PARAMETERS_FACTORY_SLOT, value: 0)
-    evm.sstore(slot: PARAMETERS_TOKEN0_SLOT, value: 0)
-    evm.sstore(slot: PARAMETERS_TOKEN1_SLOT, value: 0)
-    evm.sstore(slot: PARAMETERS_PACKED_SLOT, value: 0)
+    unsafe {
+        evm.sstore(slot: PARAMETERS_FACTORY_SLOT, value: 0)
+        evm.sstore(slot: PARAMETERS_TOKEN0_SLOT, value: 0)
+        evm.sstore(slot: PARAMETERS_TOKEN1_SLOT, value: 0)
+        evm.sstore(slot: PARAMETERS_PACKED_SLOT, value: 0)
+    }
 }
 
 #[arithmetic(unchecked)]
 fn emit_pool_deployed(_ pool: Address) uses (evm: mut Evm) {
+    // SAFETY: Raw word accesses and views below stay within this 32-byte allocation.
     let ptr = ptr::alloc_bytes(32)
-    evm.mstore(addr: ptr, value: pool.inner)
-    evm.log1(data: span(ptr, 32), topic0: POOL_DEPLOYED_TOPIC)
+    unsafe {
+        evm.mstore(addr: ptr, value: pool.inner)
+    }
+    evm.log1(
+        data: unsafe {
+            span(ptr, 32)
+        },
+        topic0: POOL_DEPLOYED_TOPIC,
+    )
 }
 
 #[arithmetic(unchecked)]
 fn return_parameters() uses (evm: mut Evm) {
-    let packed = evm.sload(PARAMETERS_PACKED_SLOT)
+    let packed = unsafe {
+        evm.sload(PARAMETERS_PACKED_SLOT)
+    }
+    // SAFETY: Raw word accesses and views below stay within this 160-byte allocation.
     let out = ptr::alloc_bytes(160)
-    evm.mstore(addr: out, value: evm.sload(PARAMETERS_FACTORY_SLOT))
-    evm.mstore(
-        addr: at(out, 32),
-        value: evm.sload(PARAMETERS_TOKEN0_SLOT),
-    )
-    evm.mstore(
-        addr: at(out, 64),
-        value: evm.sload(PARAMETERS_TOKEN1_SLOT),
-    )
-    evm.mstore(addr: at(out, 96), value: packed & MASK_U24)
-    evm.mstore(addr: at(out, 128), value: packed >> 24)
-    evm.return_data(data: span(out, 160))
+    unsafe {
+        evm.mstore(addr: out, value: evm.sload(PARAMETERS_FACTORY_SLOT))
+        evm.mstore(
+            addr: at(out, 32),
+            value: evm.sload(PARAMETERS_TOKEN0_SLOT),
+        )
+        evm.mstore(
+            addr: at(out, 64),
+            value: evm.sload(PARAMETERS_TOKEN1_SLOT),
+        )
+        evm.mstore(addr: at(out, 96), value: packed & MASK_U24)
+        evm.mstore(addr: at(out, 128), value: packed >> 24)
+    }
+    evm.return_data(data: unsafe { span(out, 160) })
 }
 
 msg MockTimeUniswapV3PoolDeployerMsg {
@@ -118,9 +140,12 @@ pub contract MockTimeUniswapV3PoolDeployer uses (evm: mut Evm) {
             assert(pool.inner != 0)
             clear_parameters()
             emit_pool_deployed(pool)
+            // SAFETY: Raw word accesses and views below stay within this 32-byte allocation.
             let out = ptr::alloc_bytes(32)
-            evm.mstore(addr: out, value: pool.inner)
-            evm.return_data(data: span(out, 32))
+            unsafe {
+                evm.mstore(addr: out, value: pool.inner)
+            }
+            evm.return_data(data: unsafe { span(out, 32) })
         }
     }
 }

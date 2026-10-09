@@ -1,3 +1,6 @@
+// Raw tick records occupy four words at keccak256(tick, mapping salt).
+// Pool callers use their dedicated tick salt; test harnesses use salt 0 and
+// bookkeeping slots 1..6, with no compiler-managed storage fields.
 use core::ptr
 use super::mem::{at, span}
 use std::abi::sol::{self, Int24}
@@ -28,10 +31,13 @@ const U256_HALF_MAX: u256 = 0x7fffffffffffffffffffffffffffffffffffffffffffffffff
 
 #[arithmetic(unchecked)]
 fn mapping_slot_at(_ tick: i256, ticks_slot: u256) -> u256 uses (evm: mut Evm) {
+    // SAFETY: Raw word accesses and views below stay within this 64-byte allocation.
     let ptr = ptr::alloc_bytes(64)
-    evm.mstore(addr: ptr, value: int_key(tick))
-    evm.mstore(addr: at(ptr, 32), value: ticks_slot)
-    evm.keccak256(data: span(ptr, 64))
+    unsafe {
+        evm.mstore(addr: ptr, value: int_key(tick))
+        evm.mstore(addr: at(ptr, 32), value: ticks_slot)
+    }
+    evm.keccak256(data: unsafe { span(ptr, 64) })
 }
 
 #[arithmetic(unchecked)]
@@ -58,42 +64,58 @@ fn decode_i128_word(_ word: u256) -> i256 {
 
 #[arithmetic(unchecked)]
 fn slot0(_ tick: i256) -> u256 uses (evm: mut Evm) {
-    evm.sload(mapping_slot(tick))
+    unsafe {
+        evm.sload(mapping_slot(tick))
+    }
 }
 
 #[arithmetic(unchecked)]
 fn slot0_at(_ tick: i256, ticks_slot: u256) -> u256 uses (evm: mut Evm) {
-    evm.sload(mapping_slot_at(tick, ticks_slot: ticks_slot))
+    unsafe {
+        evm.sload(mapping_slot_at(tick, ticks_slot: ticks_slot))
+    }
 }
 
 #[arithmetic(unchecked)]
 fn slot1(_ tick: i256) -> u256 uses (evm: mut Evm) {
-    evm.sload(mapping_slot(tick) + 1)
+    unsafe {
+        evm.sload(mapping_slot(tick) + 1)
+    }
 }
 
 #[arithmetic(unchecked)]
 fn slot1_at(_ tick: i256, ticks_slot: u256) -> u256 uses (evm: mut Evm) {
-    evm.sload(mapping_slot_at(tick, ticks_slot: ticks_slot) + 1)
+    unsafe {
+        evm.sload(mapping_slot_at(tick, ticks_slot: ticks_slot) + 1)
+    }
 }
 
 #[arithmetic(unchecked)]
 fn slot2(_ tick: i256) -> u256 uses (evm: mut Evm) {
-    evm.sload(mapping_slot(tick) + 2)
+    unsafe {
+        evm.sload(mapping_slot(tick) + 2)
+    }
 }
 
 #[arithmetic(unchecked)]
 fn slot2_at(_ tick: i256, ticks_slot: u256) -> u256 uses (evm: mut Evm) {
-    evm.sload(mapping_slot_at(tick, ticks_slot: ticks_slot) + 2)
+    unsafe {
+        evm.sload(mapping_slot_at(tick, ticks_slot: ticks_slot) + 2)
+    }
 }
 
 #[arithmetic(unchecked)]
 fn slot3(_ tick: i256) -> u256 uses (evm: mut Evm) {
-    evm.sload(mapping_slot(tick) + 3)
+    unsafe {
+        evm.sload(mapping_slot(tick) + 3)
+    }
 }
 
 #[arithmetic(unchecked)]
 fn slot3_at(_ tick: i256, ticks_slot: u256) -> u256 uses (evm: mut Evm) {
-    evm.sload(mapping_slot_at(tick, ticks_slot: ticks_slot) + 3)
+    unsafe {
+        evm.sload(mapping_slot_at(tick, ticks_slot: ticks_slot) + 3)
+    }
 }
 
 #[arithmetic(unchecked)]
@@ -102,10 +124,12 @@ uses (evm: mut Evm)
 {
     let gross_word = liquidity_gross as u256
     let net_word = signed_word(liquidity_net as i256, bits: 128) << 128
-    evm.sstore(
-        slot: mapping_slot_at(tick, ticks_slot: ticks_slot),
-        value: gross_word | net_word,
-    )
+    unsafe {
+        evm.sstore(
+            slot: mapping_slot_at(tick, ticks_slot: ticks_slot),
+            value: gross_word | net_word,
+        )
+    }
 }
 
 #[arithmetic(unchecked)]
@@ -137,10 +161,12 @@ uses (evm: mut Evm)
         | (seconds_per_liquidity_outside_x128 << 56)
         | ((seconds_outside as u256) << 216)
         | (initialized_word << 248)
-    evm.sstore(
-        slot: mapping_slot_at(tick, ticks_slot: ticks_slot) + 3,
-        value: word,
-    )
+    unsafe {
+        evm.sstore(
+            slot: mapping_slot_at(tick, ticks_slot: ticks_slot) + 3,
+            value: word,
+        )
+    }
 }
 
 #[arithmetic(unchecked)]
@@ -232,69 +258,85 @@ fn initialized_at(_ tick: i256, ticks_slot: u256) -> bool uses (evm: mut Evm) {
 }
 
 fn overflow_current_tick() -> i256 uses (evm: mut Evm) {
-    decode_i24_word(evm.sload(OVERFLOW_TICK_SLOT))
+    decode_i24_word(unsafe { evm.sload(OVERFLOW_TICK_SLOT) })
 }
 
 fn set_overflow_current_tick(_ tick: i256) uses (evm: mut Evm) {
-    evm.sstore(
-        slot: OVERFLOW_TICK_SLOT,
-        value: signed_word(tick, bits: 24),
-    )
+    unsafe {
+        evm.sstore(
+            slot: OVERFLOW_TICK_SLOT,
+            value: signed_word(tick, bits: 24),
+        )
+    }
 }
 
 fn overflow_total_liquidity() -> i256 uses (evm: mut Evm) {
-    evm.sload(OVERFLOW_TOTAL_LIQUIDITY_SLOT).downcast_unchecked()
+    unsafe { evm.sload(OVERFLOW_TOTAL_LIQUIDITY_SLOT) }.downcast_unchecked()
 }
 
 fn set_overflow_total_liquidity(_ liquidity: i256) uses (evm: mut Evm) {
-    evm.sstore(
-        slot: OVERFLOW_TOTAL_LIQUIDITY_SLOT,
-        value: int_key(liquidity),
-    )
+    unsafe {
+        evm.sstore(
+            slot: OVERFLOW_TOTAL_LIQUIDITY_SLOT,
+            value: int_key(liquidity),
+        )
+    }
 }
 
 fn overflow_fee_growth_global0_x128() -> u256 uses (evm: mut Evm) {
-    evm.sload(OVERFLOW_FEE_GROWTH_GLOBAL0_SLOT)
+    unsafe {
+        evm.sload(OVERFLOW_FEE_GROWTH_GLOBAL0_SLOT)
+    }
 }
 
 fn overflow_fee_growth_global1_x128() -> u256 uses (evm: mut Evm) {
-    evm.sload(OVERFLOW_FEE_GROWTH_GLOBAL1_SLOT)
+    unsafe {
+        evm.sload(OVERFLOW_FEE_GROWTH_GLOBAL1_SLOT)
+    }
 }
 
 fn overflow_total_growth0() -> u256 uses (evm: mut Evm) {
-    evm.sload(OVERFLOW_TOTAL_GROWTH0_SLOT)
+    unsafe {
+        evm.sload(OVERFLOW_TOTAL_GROWTH0_SLOT)
+    }
 }
 
 fn overflow_total_growth1() -> u256 uses (evm: mut Evm) {
-    evm.sload(OVERFLOW_TOTAL_GROWTH1_SLOT)
+    unsafe {
+        evm.sload(OVERFLOW_TOTAL_GROWTH1_SLOT)
+    }
 }
 
 #[arithmetic(unchecked)]
 fn increase_overflow_fee_growth_global0_x128(amount: u256) uses (evm: mut Evm) {
     let total_growth = overflow_total_growth0()
     assert(total_growth + amount > total_growth)
-    evm.sstore(
-        slot: OVERFLOW_FEE_GROWTH_GLOBAL0_SLOT,
-        value: overflow_fee_growth_global0_x128() + amount,
-    )
-    evm.sstore(
-        slot: OVERFLOW_TOTAL_GROWTH0_SLOT,
-        value: total_growth + amount,
-    )
+    unsafe {
+        evm.sstore(
+            slot: OVERFLOW_FEE_GROWTH_GLOBAL0_SLOT,
+            value: overflow_fee_growth_global0_x128() + amount,
+        )
+        evm.sstore(
+            slot: OVERFLOW_TOTAL_GROWTH0_SLOT,
+            value: total_growth + amount,
+        )
+    }
 }
 
 #[arithmetic(unchecked)]
 fn increase_overflow_fee_growth_global1_x128(amount: u256) uses (evm: mut Evm) {
     let total_growth = overflow_total_growth1()
     assert(total_growth + amount > total_growth)
-    evm.sstore(
-        slot: OVERFLOW_FEE_GROWTH_GLOBAL1_SLOT,
-        value: overflow_fee_growth_global1_x128() + amount,
-    )
-    evm.sstore(
-        slot: OVERFLOW_TOTAL_GROWTH1_SLOT,
-        value: total_growth + amount,
-    )
+    unsafe {
+        evm.sstore(
+            slot: OVERFLOW_FEE_GROWTH_GLOBAL1_SLOT,
+            value: overflow_fee_growth_global1_x128() + amount,
+        )
+        evm.sstore(
+            slot: OVERFLOW_TOTAL_GROWTH1_SLOT,
+            value: total_growth + amount,
+        )
+    }
 }
 
 #[arithmetic(unchecked)]
@@ -318,10 +360,18 @@ uses (evm: mut Evm)
 {
     let lower_base = mapping_slot_at(tick_lower, ticks_slot: ticks_slot)
     let upper_base = mapping_slot_at(tick_upper, ticks_slot: ticks_slot)
-    let lower_fee_growth_outside0_x128 = evm.sload(lower_base + 1)
-    let lower_fee_growth_outside1_x128 = evm.sload(lower_base + 2)
-    let upper_fee_growth_outside0_x128 = evm.sload(upper_base + 1)
-    let upper_fee_growth_outside1_x128 = evm.sload(upper_base + 2)
+    let lower_fee_growth_outside0_x128 = unsafe {
+        evm.sload(lower_base + 1)
+    }
+    let lower_fee_growth_outside1_x128 = unsafe {
+        evm.sload(lower_base + 2)
+    }
+    let upper_fee_growth_outside0_x128 = unsafe {
+        evm.sload(upper_base + 1)
+    }
+    let upper_fee_growth_outside1_x128 = unsafe {
+        evm.sload(upper_base + 2)
+    }
 
     let (fee_growth_below0_x128, fee_growth_below1_x128) = if tick_current >= tick_lower {
         (lower_fee_growth_outside0_x128, lower_fee_growth_outside1_x128)
@@ -385,14 +435,16 @@ uses (evm: mut Evm)
         liquidity_gross: liquidity_gross_value,
         liquidity_net: liquidity_net_value,
     )
-    evm.sstore(
-        slot: mapping_slot(tick) + 1,
-        value: fee_growth_outside0_x128,
-    )
-    evm.sstore(
-        slot: mapping_slot(tick) + 2,
-        value: fee_growth_outside1_x128,
-    )
+    unsafe {
+        evm.sstore(
+            slot: mapping_slot(tick) + 1,
+            value: fee_growth_outside0_x128,
+        )
+        evm.sstore(
+            slot: mapping_slot(tick) + 2,
+            value: fee_growth_outside1_x128,
+        )
+    }
     store_slot3(
         tick,
         tick_cumulative_outside: tick_cumulative_outside_value,
@@ -416,14 +468,22 @@ pub fn read_tick_at(_ tick: i256, ticks_slot: u256) -> (
 uses (evm: mut Evm)
 {
     let base = mapping_slot_at(tick, ticks_slot: ticks_slot)
-    let slot0_word = evm.sload(base)
-    let slot3_word = evm.sload(base + 3)
+    let slot0_word = unsafe {
+        evm.sload(base)
+    }
+    let slot3_word = unsafe {
+        evm.sload(base + 3)
+    }
     let liquidity_net_word = decode_i128_word(slot0_word >> 128)
     (
         (slot0_word & MASK_U128).downcast_unchecked(),
         liquidity_net_word.downcast_unchecked(),
-        evm.sload(base + 1),
-        evm.sload(base + 2),
+        unsafe {
+            evm.sload(base + 1)
+        },
+        unsafe {
+            evm.sload(base + 2)
+        },
         decode_i56_word(slot3_word),
         (slot3_word >> 56) & MASK_U160,
         ((slot3_word >> 216) & MAX_U32).downcast_unchecked(),
@@ -468,7 +528,9 @@ uses (evm: mut Evm)
 {
     assert(seconds_per_liquidity_cumulative_x128 <= MAX_U160)
     let base = mapping_slot_at(tick, ticks_slot: ticks_slot)
-    let slot0_word = evm.sload(base)
+    let slot0_word = unsafe {
+        evm.sload(base)
+    }
     let liquidity_gross_before: u128 = (slot0_word & MASK_U128).downcast_unchecked()
     let liquidity_gross_after = add_delta(liquidity_gross_before, liquidity_delta)
     require_short(
@@ -481,17 +543,21 @@ uses (evm: mut Evm)
     let flipped = (liquidity_gross_after == 0) != (liquidity_gross_before == 0)
     if liquidity_gross_before == 0 {
         if tick <= tick_current {
-            evm.sstore(slot: base + 1, value: fee_growth_global0_x128)
-            evm.sstore(slot: base + 2, value: fee_growth_global1_x128)
-            evm.sstore(
-                slot: base + 3,
-                value: signed_word(tick_cumulative, bits: 56)
-                    | (seconds_per_liquidity_cumulative_x128 << 56)
-                    | ((time as u256) << 216)
-                    | ((1 as u256) << 248),
-            )
+            unsafe {
+                evm.sstore(slot: base + 1, value: fee_growth_global0_x128)
+                evm.sstore(slot: base + 2, value: fee_growth_global1_x128)
+                evm.sstore(
+                    slot: base + 3,
+                    value: signed_word(tick_cumulative, bits: 56)
+                        | (seconds_per_liquidity_cumulative_x128 << 56)
+                        | ((time as u256) << 216)
+                        | ((1 as u256) << 248),
+                )
+            }
         } else {
-            evm.sstore(slot: base + 3, value: (1 as u256) << 248)
+            unsafe {
+                evm.sstore(slot: base + 3, value: (1 as u256) << 248)
+            }
         }
     }
 
@@ -501,11 +567,13 @@ uses (evm: mut Evm)
     } else {
         to_int128(liquidity_net_before + liquidity_delta as i256)
     }
-    evm.sstore(
-        slot: base,
-        value: (liquidity_gross_after as u256)
-            | (signed_word(liquidity_net_after as i256, bits: 128) << 128),
-    )
+    unsafe {
+        evm.sstore(
+            slot: base,
+            value: (liquidity_gross_after as u256)
+                | (signed_word(liquidity_net_after as i256, bits: 128) << 128),
+        )
+    }
 
     flipped
 }
@@ -541,10 +609,12 @@ uses (evm: mut Evm)
 #[arithmetic(unchecked)]
 pub fn clear_at(tick: i256, ticks_slot: u256) uses (evm: mut Evm) {
     let base = mapping_slot_at(tick, ticks_slot: ticks_slot)
-    evm.sstore(slot: base, value: 0)
-    evm.sstore(slot: base + 1, value: 0)
-    evm.sstore(slot: base + 2, value: 0)
-    evm.sstore(slot: base + 3, value: 0)
+    unsafe {
+        evm.sstore(slot: base, value: 0)
+        evm.sstore(slot: base + 1, value: 0)
+        evm.sstore(slot: base + 2, value: 0)
+        evm.sstore(slot: base + 3, value: 0)
+    }
 }
 
 pub fn clear(tick: i256) uses (evm: mut Evm) {
@@ -571,14 +641,16 @@ uses (evm: mut Evm)
     let seconds_outside_value = time - seconds_outside(tick)
     let liquidity_net_value = liquidity_net(tick)
 
-    evm.sstore(
-        slot: mapping_slot(tick) + 1,
-        value: fee_growth_outside0_x128,
-    )
-    evm.sstore(
-        slot: mapping_slot(tick) + 2,
-        value: fee_growth_outside1_x128,
-    )
+    unsafe {
+        evm.sstore(
+            slot: mapping_slot(tick) + 1,
+            value: fee_growth_outside0_x128,
+        )
+        evm.sstore(
+            slot: mapping_slot(tick) + 2,
+            value: fee_growth_outside1_x128,
+        )
+    }
     store_slot3(
         tick,
         tick_cumulative_outside: tick_cumulative_outside_value,
@@ -604,17 +676,23 @@ uses (evm: mut Evm)
 {
     assert(seconds_per_liquidity_cumulative_x128 <= MAX_U160)
     let base = mapping_slot_at(tick, ticks_slot: ticks_slot)
-    let slot0_word = evm.sload(base)
-    let slot3_word = evm.sload(base + 3)
+    let slot0_word = unsafe {
+        evm.sload(base)
+    }
+    let slot3_word = unsafe {
+        evm.sload(base + 3)
+    }
 
-    evm.sstore(
-        slot: base + 1,
-        value: fee_growth_global0_x128 - evm.sload(base + 1),
-    )
-    evm.sstore(
-        slot: base + 2,
-        value: fee_growth_global1_x128 - evm.sload(base + 2),
-    )
+    unsafe {
+        evm.sstore(
+            slot: base + 1,
+            value: fee_growth_global0_x128 - evm.sload(base + 1),
+        )
+        evm.sstore(
+            slot: base + 2,
+            value: fee_growth_global1_x128 - evm.sload(base + 2),
+        )
+    }
 
     let tick_cumulative_outside = decode_i56_word(slot3_word)
     let seconds_per_liquidity_outside = (slot3_word >> 56) & MASK_U160
@@ -623,7 +701,9 @@ uses (evm: mut Evm)
         | ((seconds_per_liquidity_cumulative_x128 - seconds_per_liquidity_outside) << 56)
         | (((time - seconds_outside_value) as u256) << 216)
         | (((slot3_word >> 248) & 0xff) << 248)
-    evm.sstore(slot: base + 3, value: word)
+    unsafe {
+        evm.sstore(slot: base + 3, value: word)
+    }
 
     let liquidity_net = decode_i128_word(slot0_word >> 128)
     liquidity_net.downcast_unchecked()
@@ -840,14 +920,16 @@ pub contract TickOverflowSafetyEchidnaTest uses (evm: mut Evm) {
     init()
     uses (mut evm)
     {
-        evm.sstore(
-            slot: OVERFLOW_FEE_GROWTH_GLOBAL0_SLOT,
-            value: U256_HALF_MAX,
-        )
-        evm.sstore(
-            slot: OVERFLOW_FEE_GROWTH_GLOBAL1_SLOT,
-            value: U256_HALF_MAX,
-        )
+        unsafe {
+            evm.sstore(
+                slot: OVERFLOW_FEE_GROWTH_GLOBAL0_SLOT,
+                value: U256_HALF_MAX,
+            )
+            evm.sstore(
+                slot: OVERFLOW_FEE_GROWTH_GLOBAL1_SLOT,
+                value: U256_HALF_MAX,
+            )
+        }
     }
 
     recv TickOverflowSafetyEchidnaTestMsg {
@@ -919,8 +1001,10 @@ pub contract TickOverflowSafetyEchidnaTest uses (evm: mut Evm) {
             assert(total_liquidity >= 0)
 
             if total_liquidity == 0 {
-                evm.sstore(slot: OVERFLOW_TOTAL_GROWTH0_SLOT, value: 0)
-                evm.sstore(slot: OVERFLOW_TOTAL_GROWTH1_SLOT, value: 0)
+                unsafe {
+                    evm.sstore(slot: OVERFLOW_TOTAL_GROWTH0_SLOT, value: 0)
+                    evm.sstore(slot: OVERFLOW_TOTAL_GROWTH1_SLOT, value: 0)
+                }
             }
         }
 

@@ -114,21 +114,27 @@ fn as_address(_ value: u256) -> Address {
 }
 
 fn address_payload(_ sender: Address) -> Bytes uses (evm: mut Evm) {
+    // SAFETY: Raw word accesses and views below stay within this 64-byte allocation.
     let ptr = ptr::alloc_bytes(64)
-    evm.mstore(addr: ptr, value: 32)
-    evm.mstore(addr: at(ptr, 32), value: sender.inner)
-    Bytes::from_abi_tail(data: ptr, len: 32, size: 64)
+    unsafe {
+        evm.mstore(addr: ptr, value: 32)
+        evm.mstore(addr: at(ptr, 32), value: sender.inner)
+        Bytes::from_abi_tail(data: ptr, len: 32, size: 64)
+    }
 }
 
 fn flash_payload(sender: Address, pay0: u256, pay1: u256) -> Bytes
 uses (evm: mut Evm)
 {
+    // SAFETY: Raw word accesses and views below stay within this 128-byte allocation.
     let ptr = ptr::alloc_bytes(128)
-    evm.mstore(addr: ptr, value: 96)
-    evm.mstore(addr: at(ptr, 32), value: sender.inner)
-    evm.mstore(addr: at(ptr, 64), value: pay0)
-    evm.mstore(addr: at(ptr, 96), value: pay1)
-    Bytes::from_abi_tail(data: ptr, len: 96, size: 128)
+    unsafe {
+        evm.mstore(addr: ptr, value: 96)
+        evm.mstore(addr: at(ptr, 32), value: sender.inner)
+        evm.mstore(addr: at(ptr, 64), value: pay0)
+        evm.mstore(addr: at(ptr, 96), value: pay1)
+        Bytes::from_abi_tail(data: ptr, len: 96, size: 128)
+    }
 }
 
 fn decode_sender(_ data: Bytes) -> Address uses (evm: Evm) {
@@ -174,26 +180,50 @@ uses (evm: mut Evm)
 fn emit_swap_callback(amount0_delta: i256, amount1_delta: i256)
 uses (evm: mut Evm)
 {
+    // SAFETY: Raw word accesses and views below stay within this 64-byte allocation.
     let ptr = ptr::alloc_bytes(64)
-    evm.mstore(addr: ptr, value: int_key(amount0_delta))
-    evm.mstore(addr: at(ptr, 32), value: int_key(amount1_delta))
-    evm.log1(data: span(ptr, 64), topic0: SWAP_CALLBACK_TOPIC)
+    unsafe {
+        evm.mstore(addr: ptr, value: int_key(amount0_delta))
+        evm.mstore(addr: at(ptr, 32), value: int_key(amount1_delta))
+    }
+    evm.log1(
+        data: unsafe {
+            span(ptr, 64)
+        },
+        topic0: SWAP_CALLBACK_TOPIC,
+    )
 }
 
 fn emit_mint_callback(amount0_owed: u256, amount1_owed: u256)
 uses (evm: mut Evm)
 {
+    // SAFETY: Raw word accesses and views below stay within this 64-byte allocation.
     let ptr = ptr::alloc_bytes(64)
-    evm.mstore(addr: ptr, value: amount0_owed)
-    evm.mstore(addr: at(ptr, 32), value: amount1_owed)
-    evm.log1(data: span(ptr, 64), topic0: MINT_CALLBACK_TOPIC)
+    unsafe {
+        evm.mstore(addr: ptr, value: amount0_owed)
+        evm.mstore(addr: at(ptr, 32), value: amount1_owed)
+    }
+    evm.log1(
+        data: unsafe {
+            span(ptr, 64)
+        },
+        topic0: MINT_CALLBACK_TOPIC,
+    )
 }
 
 fn emit_flash_callback(fee0: u256, fee1: u256) uses (evm: mut Evm) {
+    // SAFETY: Raw word accesses and views below stay within this 64-byte allocation.
     let ptr = ptr::alloc_bytes(64)
-    evm.mstore(addr: ptr, value: fee0)
-    evm.mstore(addr: at(ptr, 32), value: fee1)
-    evm.log1(data: span(ptr, 64), topic0: FLASH_CALLBACK_TOPIC)
+    unsafe {
+        evm.mstore(addr: ptr, value: fee0)
+        evm.mstore(addr: at(ptr, 32), value: fee1)
+    }
+    evm.log1(
+        data: unsafe {
+            span(ptr, 64)
+        },
+        topic0: FLASH_CALLBACK_TOPIC,
+    )
 }
 
 pub contract TestUniswapV3Callee uses (ctx: Ctx, evm: mut Evm) {

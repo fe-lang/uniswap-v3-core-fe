@@ -1,3 +1,6 @@
+// Raw storage belongs exclusively to the Oracle test harnesses: observations
+// occupy slots 0..65534, followed by state and Echidna bookkeeping at 65535..65537.
+// These contracts declare no compiler-managed storage fields.
 use core::ptr::{self, MemSpan}
 use super::mem::{at, span}
 use std::abi::sol::{self, Int24}
@@ -40,7 +43,9 @@ fn observation_slot(_ index: u256) -> u256 {
 }
 
 fn read_observation(_ index: u256) -> Observation uses (evm: Evm) {
-    let word = evm.sload(observation_slot(index))
+    let word = unsafe {
+        evm.sload(observation_slot(index))
+    }
     Observation {
         block_timestamp: (word & MAX_U32).downcast_unchecked(),
         tick_cumulative: decode_i56_word(word >> 32),
@@ -64,11 +69,15 @@ uses (evm: mut Evm)
         | (signed_word(tick_cumulative, bits: 56) << 32)
         | (seconds_per_liquidity_cumulative_x128 << 88)
         | (initialized_word << 248)
-    evm.sstore(slot: observation_slot(index), value: word)
+    unsafe {
+        evm.sstore(slot: observation_slot(index), value: word)
+    }
 }
 
 fn state_word() -> u256 uses (evm: Evm) {
-    evm.sload(STATE_SLOT)
+    unsafe {
+        evm.sload(STATE_SLOT)
+    }
 }
 
 fn state_time() -> u32 uses (evm: Evm) {
@@ -96,19 +105,23 @@ fn state_cardinality_next() -> u16 uses (evm: Evm) {
 }
 
 fn echidna_initialized() -> bool uses (evm: Evm) {
-    evm.sload(ECHIDNA_INITIALIZED_SLOT) != 0
+    unsafe { evm.sload(ECHIDNA_INITIALIZED_SLOT) } != 0
 }
 
 fn set_echidna_initialized() uses (evm: mut Evm) {
-    evm.sstore(slot: ECHIDNA_INITIALIZED_SLOT, value: 1)
+    unsafe {
+        evm.sstore(slot: ECHIDNA_INITIALIZED_SLOT, value: 1)
+    }
 }
 
 fn echidna_time_passed() -> u32 uses (evm: Evm) {
-    (evm.sload(ECHIDNA_TIME_PASSED_SLOT) & MAX_U32).downcast_unchecked()
+    (unsafe { evm.sload(ECHIDNA_TIME_PASSED_SLOT) } & MAX_U32).downcast_unchecked()
 }
 
 fn set_echidna_time_passed(_ time_passed: u32) uses (evm: mut Evm) {
-    evm.sstore(slot: ECHIDNA_TIME_PASSED_SLOT, value: time_passed as u256)
+    unsafe {
+        evm.sstore(slot: ECHIDNA_TIME_PASSED_SLOT, value: time_passed as u256)
+    }
 }
 
 #[arithmetic(unchecked)]
@@ -134,7 +147,9 @@ uses (evm: mut Evm)
         | ((index as u256) << 184)
         | ((cardinality as u256) << 200)
         | ((cardinality_next as u256) << 216)
-    evm.sstore(slot: STATE_SLOT, value: word)
+    unsafe {
+        evm.sstore(slot: STATE_SLOT, value: word)
+    }
 }
 
 #[arithmetic(unchecked)]
@@ -411,40 +426,55 @@ fn encode_int56(_ value: i256) -> u256 {
     int_key(value)
 }
 
+#[arithmetic(checked)]
 fn handle_observe(return_gas: bool) -> ! uses (evm: mut Evm) {
     assert!(state_cardinality() > 0, "I")
     let gas_before = evm.gas()
+    let calldata_size = evm.calldatasize()
+    assert(calldata_size >= 36)
     let args_offset = evm.calldataload(4)
-    let len = evm.calldataload(4 + args_offset)
-    let out = ptr::alloc_bytes(64 + 32 + len * 32 + 32 + len * 32)
+    assert(args_offset <= calldata_size - 36)
+    let elements_offset = 4 + args_offset + 32
+    let len = evm.calldataload(elements_offset - 32)
+    assert(len <= (calldata_size - elements_offset) / 32)
+    let out_len = 128 + len * 64
+    let out = ptr::alloc_bytes(out_len)
     let first_offset: u256 = 64
     let second_offset = 64 + 32 + len * 32
-    evm.mstore(addr: out, value: first_offset)
-    evm.mstore(addr: at(out, 32), value: second_offset)
-    evm.mstore(addr: at(out, first_offset), value: len)
-    evm.mstore(addr: at(out, second_offset), value: len)
+    // SAFETY: Checked size arithmetic covers both array headers and every word
+    // below; the calldata extent check also bounds all element reads.
+    unsafe {
+        evm.mstore(addr: out, value: first_offset)
+        evm.mstore(addr: at(out, 32), value: second_offset)
+        evm.mstore(addr: at(out, first_offset), value: len)
+        evm.mstore(addr: at(out, second_offset), value: len)
+    }
 
     let mut i: u256 = 0
     while i < len {
-        let seconds_ago: u32 = evm.calldataload(4 + args_offset + 32 + i * 32).downcast_unchecked()
+        let seconds_ago: u32 = evm.calldataload(elements_offset + i * 32).downcast_unchecked()
         let (tick_cumulative, seconds_per_liquidity_cumulative_x128) = observe_single(seconds_ago)
-        evm.mstore(
-            addr: at(out, first_offset + 32 + i * 32),
-            value: encode_int56(tick_cumulative),
-        )
-        evm.mstore(
-            addr: at(out, second_offset + 32 + i * 32),
-            value: seconds_per_liquidity_cumulative_x128,
-        )
+        unsafe {
+            evm.mstore(
+                addr: at(out, first_offset + 32 + i * 32),
+                value: encode_int56(tick_cumulative),
+            )
+            evm.mstore(
+                addr: at(out, second_offset + 32 + i * 32),
+                value: seconds_per_liquidity_cumulative_x128,
+            )
+        }
         i += 1
     }
 
     if return_gas {
-        evm.mstore(addr: out, value: gas_before - evm.gas())
-        evm.return_data(data: span(out, 32))
+        unsafe {
+            evm.mstore(addr: out, value: gas_before - evm.gas())
+            evm.return_data(data: span(out, 32))
+        }
     }
 
-    evm.return_data(data: span(out, 64 + 32 + len * 32 + 32 + len * 32))
+    evm.return_data(data: unsafe { span(out, out_len) })
 }
 
 msg OracleTestMsg {

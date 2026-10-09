@@ -5,10 +5,13 @@ use std::evm::{Address, Call, Evm, RawMem}
 const TRANSFER_SELECTOR: u256 = 0xa9059cbb
 
 pub fn safe_transfer(token: Address, to: Address, value: u256) uses (evm: mut Evm) {
+    // SAFETY: Raw word accesses and views below stay within this 68-byte allocation.
     let ptr = ptr::alloc_bytes(68)
-    evm.mstore(addr: ptr, value: TRANSFER_SELECTOR << 224)
-    evm.mstore(addr: at(ptr, 4), value: to.inner)
-    evm.mstore(addr: at(ptr, 36), value: value)
+    unsafe {
+        evm.mstore(addr: ptr, value: TRANSFER_SELECTOR << 224)
+        evm.mstore(addr: at(ptr, 4), value: to.inner)
+        evm.mstore(addr: at(ptr, 36), value: value)
+    }
 
     let mut ret = MemBuffer::with_capacity(32)
     let outcome = evm
@@ -16,13 +19,16 @@ pub fn safe_transfer(token: Address, to: Address, value: u256) uses (evm: mut Ev
             addr: token,
             gas: evm.gas(),
             value: 0,
-            args: span(ptr, 68),
+            args: unsafe {
+                span(ptr, 68)
+            },
             ret: mut ret,
         )
     let ret_len = outcome.returndata_len()
     let mut returned_true = false
     if ret_len >= 32 {
-        returned_true = evm.mload(ret.ptr()) != 0
+        // SAFETY: ret has capacity 32 and the call returned at least one full word.
+        returned_true = unsafe { evm.mload(ret.ptr()) } != 0
     }
 
     assert!(outcome.success() && (ret_len == 0 || returned_true), "TF")

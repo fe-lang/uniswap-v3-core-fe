@@ -177,12 +177,15 @@ fn decode_int24_word(_ word: u256) -> i256 {
 #[arithmetic(unchecked)]
 fn require_msg(_ evm: mut Evm, condition: bool, code: u256, len: u256) {
     if !condition {
+        // SAFETY: Raw word accesses and views below stay within this 100-byte allocation.
         let out = ptr::alloc_bytes(100)
-        evm.mstore(addr: out, value: ERROR_STRING_SELECTOR_WORD)
-        evm.mstore(addr: at(out, 4), value: 32)
-        evm.mstore(addr: at(out, 36), value: len)
-        evm.mstore(addr: at(out, 68), value: code)
-        evm.revert(data: span(out, 100))
+        unsafe {
+            evm.mstore(addr: out, value: ERROR_STRING_SELECTOR_WORD)
+            evm.mstore(addr: at(out, 4), value: 32)
+            evm.mstore(addr: at(out, 36), value: len)
+            evm.mstore(addr: at(out, 68), value: code)
+        }
+        evm.revert(data: unsafe { span(out, 100) })
     }
 }
 
@@ -337,58 +340,81 @@ fn next_sqrt_price_amount1_sub(sqrt_p_x96: u256, _ liquidity: u128, amount: u256
 fn balance_of(token: Address, account: Address) -> u256
 uses (call: mut Call, evm: mut Evm)
 {
+    // SAFETY: Raw word accesses and views below stay within this 36-byte allocation.
     let args = ptr::alloc_bytes(36)
-    evm.mstore(addr: args, value: (0x70a08231 as u256) << 224)
-    evm.mstore(addr: at(args, 4), value: account.inner)
+    unsafe {
+        evm.mstore(addr: args, value: (0x70a08231 as u256) << 224)
+        evm.mstore(addr: at(args, 4), value: account.inner)
+    }
     let mut ret = MemBuffer::with_capacity(32)
-    let outcome = call.raw_staticcall(
+    let outcome = call
+        .raw_staticcall(
             addr: token,
             gas: 1000000,
-            args: span(args, 36),
+            args: unsafe {
+                span(args, 36)
+            },
             ret: mut ret,
         )
     assert(outcome.success() && outcome.returndata_len() >= 32)
-    evm.mload(ret.ptr())
+    // SAFETY: The successful call initialized at least 32 bytes of ret.
+    unsafe {
+        evm.mload(ret.ptr())
+    }
 }
 
 #[arithmetic(unchecked)]
 fn factory_owner(factory: Address) -> u256 uses (call: mut Call, evm: mut Evm) {
+    // SAFETY: Raw word accesses and views below stay within this 32-byte allocation.
     let args = ptr::alloc_bytes(32)
-    evm.mstore(addr: args, value: (0x8da5cb5b as u256) << 224)
+    unsafe {
+        evm.mstore(addr: args, value: (0x8da5cb5b as u256) << 224)
+    }
     let mut ret = MemBuffer::with_capacity(32)
     let outcome = call
         .raw_staticcall(
             addr: factory,
             gas: evm.gas(),
-            args: span(args, 4),
+            args: unsafe {
+                span(args, 4)
+            },
             ret: mut ret,
         )
     assert(outcome.success() && outcome.returndata_len() >= 32)
-    evm.mload(ret.ptr())
+    // SAFETY: The successful call initialized at least 32 bytes of ret.
+    unsafe {
+        evm.mload(ret.ptr())
+    }
 }
 
 #[arithmetic(unchecked)]
 fn load_deployer_parameters(deployer: Address) -> (Address, Address, Address, u32, i32)
 uses (call: mut Call, evm: mut Evm)
 {
+    // SAFETY: Raw word accesses and views below stay within this 32-byte allocation.
     let args = ptr::alloc_bytes(32)
-    evm.mstore(addr: args, value: (0x89035730 as u256) << 224)
+    unsafe {
+        evm.mstore(addr: args, value: (0x89035730 as u256) << 224)
+    }
     let mut ret = MemBuffer::with_capacity(160)
     let outcome = call
         .raw_staticcall(
             addr: deployer,
             gas: evm.gas(),
-            args: span(args, 4),
+            args: unsafe {
+                span(args, 4)
+            },
             ret: mut ret,
         )
     assert(outcome.success() && outcome.returndata_len() >= 160)
+    // SAFETY: The preceding returndata-length check covers every word read below.
     let ptr = ret.ptr()
     (
-        Address { inner: evm.mload(ptr) },
-        Address { inner: evm.mload(at(ptr, 32)) },
-        Address { inner: evm.mload(at(ptr, 64)) },
-        evm.mload(at(ptr, 96)).downcast_unchecked(),
-        decode_int24_word(evm.mload(at(ptr, 128))).downcast_unchecked(),
+        Address { inner: unsafe { evm.mload(ptr) } },
+        Address { inner: unsafe { evm.mload(at(ptr, 32)) } },
+        Address { inner: unsafe { evm.mload(at(ptr, 64)) } },
+        unsafe { evm.mload(at(ptr, 96)) }.downcast_unchecked(),
+        decode_int24_word(unsafe { evm.mload(at(ptr, 128)) }).downcast_unchecked(),
     )
 }
 
@@ -481,6 +507,8 @@ uses (evm: mut Evm, store: mut MockTimePoolStore)
         fee_growth_global1_x128: store.fee_growth_global1_x128,
         ticks_slot: TICKS_SLOT,
     )
+    // SAFETY: Position accesses below use the dedicated hashed position range,
+    // which is separate from compiler-managed PoolStore fields.
     let position_slot = position::position_slot(
         owner,
         tick_lower,
@@ -546,14 +574,16 @@ uses (evm: mut Evm, store: mut MockTimePoolStore)
     } else {
         0
     }
-    position::update(
-        base_slot: position_slot,
-        liquidity_delta,
-        fee_growth_inside0_x128,
-        fee_growth_inside1_x128,
-        principal_owed0_delta,
-        principal_owed1_delta,
-    )
+    unsafe {
+        position::update(
+            base_slot: position_slot,
+            liquidity_delta,
+            fee_growth_inside0_x128,
+            fee_growth_inside1_x128,
+            principal_owed0_delta,
+            principal_owed1_delta,
+        )
+    }
 
     if liquidity_delta < 0 {
         if flipped_lower {
@@ -716,10 +746,12 @@ uses (call: mut Call, evm: mut Evm)
     let len = 100 + data_size
     let mut buf = MemBuffer::alloc(len)
     let ptr = buf.ptr()
-    evm.mstore(addr: ptr, value: (0xd3487997 as u256) << 224)
-    evm.mstore(addr: at(ptr, 4), value: amount0)
-    evm.mstore(addr: at(ptr, 36), value: amount1)
-    evm.mstore(addr: at(ptr, 68), value: 96)
+    unsafe {
+        evm.mstore(addr: ptr, value: (0xd3487997 as u256) << 224)
+        evm.mstore(addr: at(ptr, 4), value: amount0)
+        evm.mstore(addr: at(ptr, 36), value: amount1)
+        evm.mstore(addr: at(ptr, 68), value: 96)
+    }
     evm.calldatacopy(
         dest: mut buf,
         dest_offset: 100,
@@ -746,11 +778,13 @@ uses (call: mut Call, evm: mut Evm)
 {
     let mut buf = MemBuffer::alloc(228)
     let ptr = buf.ptr()
-    evm.mstore(addr: ptr, value: FLASH_CALLBACK_SELECTOR << 224)
-    evm.mstore(addr: at(ptr, 4), value: fee0)
-    evm.mstore(addr: at(ptr, 36), value: fee1)
-    evm.mstore(addr: at(ptr, 68), value: 96)
-    evm.mstore(addr: at(ptr, 100), value: 96)
+    unsafe {
+        evm.mstore(addr: ptr, value: FLASH_CALLBACK_SELECTOR << 224)
+        evm.mstore(addr: at(ptr, 4), value: fee0)
+        evm.mstore(addr: at(ptr, 36), value: fee1)
+        evm.mstore(addr: at(ptr, 68), value: 96)
+        evm.mstore(addr: at(ptr, 100), value: 96)
+    }
     evm.calldatacopy(
         dest: mut buf,
         dest_offset: 132,
@@ -785,10 +819,12 @@ uses (call: mut Call, evm: mut Evm)
     let len = 100 + data_size
     let mut buf = MemBuffer::alloc(len)
     let ptr = buf.ptr()
-    evm.mstore(addr: ptr, value: SWAP_CALLBACK_SELECTOR << 224)
-    evm.mstore(addr: at(ptr, 4), value: amount0_delta)
-    evm.mstore(addr: at(ptr, 36), value: amount1_delta)
-    evm.mstore(addr: at(ptr, 68), value: 96)
+    unsafe {
+        evm.mstore(addr: ptr, value: SWAP_CALLBACK_SELECTOR << 224)
+        evm.mstore(addr: at(ptr, 4), value: amount0_delta)
+        evm.mstore(addr: at(ptr, 36), value: amount1_delta)
+        evm.mstore(addr: at(ptr, 68), value: 96)
+    }
     evm.calldatacopy(
         dest: mut buf,
         dest_offset: 100,
@@ -811,21 +847,29 @@ uses (call: mut Call, evm: mut Evm)
 
 #[arithmetic(unchecked)]
 fn emit_initialize(sqrt_price_x96: u256, tick: i32) uses (evm: mut Evm) {
+    // SAFETY: Raw word accesses and views below stay within this 64-byte allocation.
     let out = ptr::alloc_bytes(64)
-    evm.mstore(addr: out, value: sqrt_price_x96)
-    evm.mstore(addr: at(out, 32), value: int24_abi_word(tick))
-    evm.log1(data: span(out, 64), topic0: INITIALIZE_TOPIC)
+    unsafe {
+        evm.mstore(addr: out, value: sqrt_price_x96)
+        evm.mstore(addr: at(out, 32), value: int24_abi_word(tick))
+    }
+    evm.log1(data: unsafe { span(out, 64) }, topic0: INITIALIZE_TOPIC)
 }
 
 #[arithmetic(unchecked)]
 fn emit_increase_observation_cardinality_next(old: u16, new: u16)
 uses (evm: mut Evm)
 {
+    // SAFETY: Raw word accesses and views below stay within this 64-byte allocation.
     let out = ptr::alloc_bytes(64)
-    evm.mstore(addr: out, value: old as u256)
-    evm.mstore(addr: at(out, 32), value: new as u256)
+    unsafe {
+        evm.mstore(addr: out, value: old as u256)
+        evm.mstore(addr: at(out, 32), value: new as u256)
+    }
     evm.log1(
-        data: span(out, 64),
+        data: unsafe {
+            span(out, 64)
+        },
         topic0: INCREASE_OBSERVATION_CARDINALITY_NEXT_TOPIC,
     )
 }
@@ -842,13 +886,18 @@ fn emit_mint(
 )
 uses (evm: mut Evm)
 {
+    // SAFETY: Raw word accesses and views below stay within this 128-byte allocation.
     let ptr = ptr::alloc_bytes(128)
-    evm.mstore(addr: ptr, value: sender.inner)
-    evm.mstore(addr: at(ptr, 32), value: amount as u256)
-    evm.mstore(addr: at(ptr, 64), value: amount0)
-    evm.mstore(addr: at(ptr, 96), value: amount1)
+    unsafe {
+        evm.mstore(addr: ptr, value: sender.inner)
+        evm.mstore(addr: at(ptr, 32), value: amount as u256)
+        evm.mstore(addr: at(ptr, 64), value: amount0)
+        evm.mstore(addr: at(ptr, 96), value: amount1)
+    }
     evm.log4(
-        data: span(ptr, 128),
+        data: unsafe {
+            span(ptr, 128)
+        },
         topic0: MINT_TOPIC,
         topic1: owner.inner,
         topic2: int24_abi_word(tick_lower),
@@ -867,12 +916,17 @@ fn emit_burn(
 )
 uses (evm: mut Evm)
 {
+    // SAFETY: Raw word accesses and views below stay within this 96-byte allocation.
     let ptr = ptr::alloc_bytes(96)
-    evm.mstore(addr: ptr, value: amount as u256)
-    evm.mstore(addr: at(ptr, 32), value: amount0)
-    evm.mstore(addr: at(ptr, 64), value: amount1)
+    unsafe {
+        evm.mstore(addr: ptr, value: amount as u256)
+        evm.mstore(addr: at(ptr, 32), value: amount0)
+        evm.mstore(addr: at(ptr, 64), value: amount1)
+    }
     evm.log4(
-        data: span(ptr, 96),
+        data: unsafe {
+            span(ptr, 96)
+        },
         topic0: BURN_TOPIC,
         topic1: owner.inner,
         topic2: int24_abi_word(tick_lower),
@@ -891,13 +945,18 @@ fn emit_flash(
 )
 uses (evm: mut Evm)
 {
+    // SAFETY: Raw word accesses and views below stay within this 128-byte allocation.
     let ptr = ptr::alloc_bytes(128)
-    evm.mstore(addr: ptr, value: amount0)
-    evm.mstore(addr: at(ptr, 32), value: amount1)
-    evm.mstore(addr: at(ptr, 64), value: paid0)
-    evm.mstore(addr: at(ptr, 96), value: paid1)
+    unsafe {
+        evm.mstore(addr: ptr, value: amount0)
+        evm.mstore(addr: at(ptr, 32), value: amount1)
+        evm.mstore(addr: at(ptr, 64), value: paid0)
+        evm.mstore(addr: at(ptr, 96), value: paid1)
+    }
     evm.log3(
-        data: span(ptr, 128),
+        data: unsafe {
+            span(ptr, 128)
+        },
         topic0: FLASH_TOPIC,
         topic1: sender.inner,
         topic2: recipient.inner,
@@ -912,29 +971,38 @@ fn return_snapshot(
 ) -> !
 uses (evm: mut Evm)
 {
+    // SAFETY: Raw word accesses and views below stay within this 96-byte allocation.
     let out = ptr::alloc_bytes(96)
-    evm.mstore(addr: out, value: int_key(tick_cumulative_inside))
-    evm.mstore(
-        addr: at(out, 32),
-        value: seconds_per_liquidity_inside_x128,
-    )
-    evm.mstore(addr: at(out, 64), value: seconds_inside as u256)
-    evm.return_data(data: span(out, 96))
+    unsafe {
+        evm.mstore(addr: out, value: int_key(tick_cumulative_inside))
+        evm.mstore(
+            addr: at(out, 32),
+            value: seconds_per_liquidity_inside_x128,
+        )
+        evm.mstore(addr: at(out, 64), value: seconds_inside as u256)
+    }
+    evm.return_data(data: unsafe { span(out, 96) })
 }
 
 #[arithmetic(unchecked)]
 fn return_pair(amount0: u256, amount1: u256) -> ! uses (evm: mut Evm) {
+    // SAFETY: Raw word accesses and views below stay within this 64-byte allocation.
     let out = ptr::alloc_bytes(64)
-    evm.mstore(addr: out, value: amount0)
-    evm.mstore(addr: at(out, 32), value: amount1)
-    evm.return_data(data: span(out, 64))
+    unsafe {
+        evm.mstore(addr: out, value: amount0)
+        evm.mstore(addr: at(out, 32), value: amount1)
+    }
+    evm.return_data(data: unsafe { span(out, 64) })
 }
 
 #[arithmetic(unchecked)]
 fn return_word(value: u256) -> ! uses (evm: mut Evm) {
+    // SAFETY: Raw word accesses and views below stay within this 32-byte allocation.
     let out = ptr::alloc_bytes(32)
-    evm.mstore(addr: out, value)
-    evm.return_data(data: span(out, 32))
+    unsafe {
+        evm.mstore(addr: out, value)
+    }
+    evm.return_data(data: unsafe { span(out, 32) })
 }
 
 #[arithmetic(unchecked)]
@@ -949,18 +1017,21 @@ fn return_slot0(
 ) -> !
 uses (evm: mut Evm)
 {
+    // SAFETY: Raw word accesses and views below stay within this 224-byte allocation.
     let out = ptr::alloc_bytes(224)
-    evm.mstore(addr: out, value: sqrt_price_x96)
-    evm.mstore(addr: at(out, 32), value: int_key(tick as i256))
-    evm.mstore(addr: at(out, 64), value: observation_index as u256)
-    evm.mstore(addr: at(out, 96), value: observation_cardinality as u256)
-    evm.mstore(
-        addr: at(out, 128),
-        value: observation_cardinality_next as u256,
-    )
-    evm.mstore(addr: at(out, 160), value: fee_protocol as u256)
-    evm.mstore(addr: at(out, 192), value: if unlocked { 1 } else { 0 })
-    evm.return_data(data: span(out, 224))
+    unsafe {
+        evm.mstore(addr: out, value: sqrt_price_x96)
+        evm.mstore(addr: at(out, 32), value: int_key(tick as i256))
+        evm.mstore(addr: at(out, 64), value: observation_index as u256)
+        evm.mstore(addr: at(out, 96), value: observation_cardinality as u256)
+        evm.mstore(
+            addr: at(out, 128),
+            value: observation_cardinality_next as u256,
+        )
+        evm.mstore(addr: at(out, 160), value: fee_protocol as u256)
+        evm.mstore(addr: at(out, 192), value: if unlocked { 1 } else { 0 })
+    }
+    evm.return_data(data: unsafe { span(out, 224) })
 }
 
 #[arithmetic(unchecked)]
@@ -972,15 +1043,18 @@ fn return_observation(
 ) -> !
 uses (evm: mut Evm)
 {
+    // SAFETY: Raw word accesses and views below stay within this 128-byte allocation.
     let out = ptr::alloc_bytes(128)
-    evm.mstore(addr: out, value: block_timestamp as u256)
-    evm.mstore(addr: at(out, 32), value: int_key(tick_cumulative as i256))
-    evm.mstore(
-        addr: at(out, 64),
-        value: seconds_per_liquidity_cumulative_x128,
-    )
-    evm.mstore(addr: at(out, 96), value: if initialized { 1 } else { 0 })
-    evm.return_data(data: span(out, 128))
+    unsafe {
+        evm.mstore(addr: out, value: block_timestamp as u256)
+        evm.mstore(addr: at(out, 32), value: int_key(tick_cumulative as i256))
+        evm.mstore(
+            addr: at(out, 64),
+            value: seconds_per_liquidity_cumulative_x128,
+        )
+        evm.mstore(addr: at(out, 96), value: if initialized { 1 } else { 0 })
+    }
+    evm.return_data(data: unsafe { span(out, 128) })
 }
 
 #[arithmetic(unchecked)]
@@ -996,22 +1070,25 @@ fn return_tick_info(
 ) -> !
 uses (evm: mut Evm)
 {
+    // SAFETY: Raw word accesses and views below stay within this 256-byte allocation.
     let out = ptr::alloc_bytes(256)
-    evm.mstore(addr: out, value: liquidity_gross as u256)
-    evm.mstore(addr: at(out, 32), value: int_key(liquidity_net as i256))
-    evm.mstore(addr: at(out, 64), value: fee_growth_outside0_x128)
-    evm.mstore(addr: at(out, 96), value: fee_growth_outside1_x128)
-    evm.mstore(
-        addr: at(out, 128),
-        value: int_key(tick_cumulative_outside),
-    )
-    evm.mstore(
-        addr: at(out, 160),
-        value: seconds_per_liquidity_outside_x128,
-    )
-    evm.mstore(addr: at(out, 192), value: seconds_outside as u256)
-    evm.mstore(addr: at(out, 224), value: if initialized { 1 } else { 0 })
-    evm.return_data(data: span(out, 256))
+    unsafe {
+        evm.mstore(addr: out, value: liquidity_gross as u256)
+        evm.mstore(addr: at(out, 32), value: int_key(liquidity_net as i256))
+        evm.mstore(addr: at(out, 64), value: fee_growth_outside0_x128)
+        evm.mstore(addr: at(out, 96), value: fee_growth_outside1_x128)
+        evm.mstore(
+            addr: at(out, 128),
+            value: int_key(tick_cumulative_outside),
+        )
+        evm.mstore(
+            addr: at(out, 160),
+            value: seconds_per_liquidity_outside_x128,
+        )
+        evm.mstore(addr: at(out, 192), value: seconds_outside as u256)
+        evm.mstore(addr: at(out, 224), value: if initialized { 1 } else { 0 })
+    }
+    evm.return_data(data: unsafe { span(out, 256) })
 }
 
 #[arithmetic(unchecked)]
@@ -1024,13 +1101,16 @@ fn return_position_info(
 ) -> !
 uses (evm: mut Evm)
 {
+    // SAFETY: Raw word accesses and views below stay within this 160-byte allocation.
     let out = ptr::alloc_bytes(160)
-    evm.mstore(addr: out, value: liquidity_value as u256)
-    evm.mstore(addr: at(out, 32), value: fee_growth_inside0_last_x128)
-    evm.mstore(addr: at(out, 64), value: fee_growth_inside1_last_x128)
-    evm.mstore(addr: at(out, 96), value: tokens_owed0 as u256)
-    evm.mstore(addr: at(out, 128), value: tokens_owed1 as u256)
-    evm.return_data(data: span(out, 160))
+    unsafe {
+        evm.mstore(addr: out, value: liquidity_value as u256)
+        evm.mstore(addr: at(out, 32), value: fee_growth_inside0_last_x128)
+        evm.mstore(addr: at(out, 64), value: fee_growth_inside1_last_x128)
+        evm.mstore(addr: at(out, 96), value: tokens_owed0 as u256)
+        evm.mstore(addr: at(out, 128), value: tokens_owed1 as u256)
+    }
+    evm.return_data(data: unsafe { span(out, 160) })
 }
 
 pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
@@ -1296,12 +1376,20 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             let fee_protocol: u8 = ((feeProtocol0 as u256) | ((feeProtocol1 as u256) << 4))
                 .downcast_unchecked()
             store.slot0 = store.slot0.with_fee_protocol(fee_protocol)
+            // SAFETY: Raw word accesses and views below stay within this 128-byte allocation.
             let log_data = ptr::alloc_bytes(128)
-            evm.mstore(addr: log_data, value: (old & 0x0f) as u256)
-            evm.mstore(addr: at(log_data, 32), value: (old >> 4) as u256)
-            evm.mstore(addr: at(log_data, 64), value: feeProtocol0 as u256)
-            evm.mstore(addr: at(log_data, 96), value: feeProtocol1 as u256)
-            evm.log1(data: span(log_data, 128), topic0: SET_FEE_PROTOCOL_TOPIC)
+            unsafe {
+                evm.mstore(addr: log_data, value: (old & 0x0f) as u256)
+                evm.mstore(addr: at(log_data, 32), value: (old >> 4) as u256)
+                evm.mstore(addr: at(log_data, 64), value: feeProtocol0 as u256)
+                evm.mstore(addr: at(log_data, 96), value: feeProtocol1 as u256)
+            }
+            evm.log1(
+                data: unsafe {
+                    span(log_data, 128)
+                },
+                topic0: SET_FEE_PROTOCOL_TOPIC,
+            )
             store.slot0 = store.slot0.unlock()
         }
 
@@ -1332,11 +1420,16 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 safe_transfer(token: token1, to: recipient, value: amount1 as u256)
             }
 
+            // SAFETY: Raw word accesses and views below stay within this 64-byte allocation.
             let out = ptr::alloc_bytes(64)
-            evm.mstore(addr: out, value: amount0 as u256)
-            evm.mstore(addr: at(out, 32), value: amount1 as u256)
+            unsafe {
+                evm.mstore(addr: out, value: amount0 as u256)
+                evm.mstore(addr: at(out, 32), value: amount1 as u256)
+            }
             evm.log3(
-                data: span(out, 64),
+                data: unsafe {
+                    span(out, 64)
+                },
                 topic0: COLLECT_PROTOCOL_TOPIC,
                 topic1: ctx.caller().inner,
                 topic2: recipient.inner,
@@ -1665,14 +1758,19 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 code: MSG_IIA,
                 len: 3,
             )
+            // SAFETY: Raw word accesses and views below stay within this 160-byte allocation.
             let log_data = ptr::alloc_bytes(160)
-            evm.mstore(addr: log_data, value: amount0_delta)
-            evm.mstore(addr: at(log_data, 32), value: amount1_delta)
-            evm.mstore(addr: at(log_data, 64), value: sqrt_price_x96)
-            evm.mstore(addr: at(log_data, 96), value: liquidity_current as u256)
-            evm.mstore(addr: at(log_data, 128), value: int_key(tick_current))
+            unsafe {
+                evm.mstore(addr: log_data, value: amount0_delta)
+                evm.mstore(addr: at(log_data, 32), value: amount1_delta)
+                evm.mstore(addr: at(log_data, 64), value: sqrt_price_x96)
+                evm.mstore(addr: at(log_data, 96), value: liquidity_current as u256)
+                evm.mstore(addr: at(log_data, 128), value: int_key(tick_current))
+            }
             evm.log3(
-                data: span(log_data, 160),
+                data: unsafe {
+                    span(log_data, 160)
+                },
                 topic0: SWAP_TOPIC,
                 topic1: ctx.caller().inner,
                 topic2: recipient.inner,
@@ -1701,17 +1799,20 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 time_delta,
                 liquidity: store.liquidity,
             )
+            // SAFETY: Raw word accesses and views below stay within this 192-byte allocation.
             let out = ptr::alloc_bytes(192)
-            evm.mstore(addr: out, value: 64)
-            evm.mstore(addr: at(out, 32), value: 128)
-            evm.mstore(addr: at(out, 64), value: 1)
-            evm.mstore(addr: at(out, 96), value: int_key(tick_cumulative))
-            evm.mstore(addr: at(out, 128), value: 1)
-            evm.mstore(
-                addr: at(out, 160),
-                value: seconds_per_liquidity_cumulative_x128,
-            )
-            evm.return_data(data: span(out, 192))
+            unsafe {
+                evm.mstore(addr: out, value: 64)
+                evm.mstore(addr: at(out, 32), value: 128)
+                evm.mstore(addr: at(out, 64), value: 1)
+                evm.mstore(addr: at(out, 96), value: int_key(tick_cumulative))
+                evm.mstore(addr: at(out, 128), value: 1)
+                evm.mstore(
+                    addr: at(out, 160),
+                    value: seconds_per_liquidity_cumulative_x128,
+                )
+            }
+            evm.return_data(data: unsafe { span(out, 192) })
         }
 
         Ticks uses (mut evm) {
@@ -1738,6 +1839,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             )
         }
 
+        // SAFETY: Position mapping slots use the dedicated position salt.
         Positions uses (mut evm) {
             let (
                 liquidity_value,
@@ -1745,9 +1847,14 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 fee_growth_inside1_last_x128,
                 tokens_owed0,
                 tokens_owed1,
-            ) = position::read_position(
-                position::mapping_slot(key: evm.calldataload(4), positions_slot: POSITIONS_SLOT),
-            )
+            ) = unsafe {
+                position::read_position(
+                    position::mapping_slot(
+                        key: evm.calldataload(4),
+                        positions_slot: POSITIONS_SLOT,
+                    ),
+                )
+            }
             return_position_info(
                 liquidity_value,
                 fee_growth_inside0_last_x128,
@@ -1861,22 +1968,28 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             let tick_upper = decode_int24_word(evm.calldataload(68))
             let amount0_requested = decode_u128_word(evm.calldataload(100))
             let amount1_requested = decode_u128_word(evm.calldataload(132))
+            // SAFETY: Position accesses below use the dedicated hashed position range,
+            // which is separate from compiler-managed PoolStore fields.
             let position_slot = position::position_slot(
                 owner: ctx.caller(),
                 tick_lower,
                 tick_upper,
                 positions_slot: POSITIONS_SLOT,
             )
-            let (tokens_owed0, tokens_owed1) = position::read_tokens_owed(position_slot)
+            let (tokens_owed0, tokens_owed1) = unsafe {
+                position::read_tokens_owed(position_slot)
+            }
             let amount0 = min_u128(a: amount0_requested, b: tokens_owed0)
             let amount1 = min_u128(a: amount1_requested, b: tokens_owed1)
 
             if amount0 > 0 || amount1 > 0 {
-                position::set_tokens_owed(
-                    base_slot: position_slot,
-                    token0: tokens_owed0 - amount0,
-                    token1: tokens_owed1 - amount1,
-                )
+                unsafe {
+                    position::set_tokens_owed(
+                        base_slot: position_slot,
+                        token0: tokens_owed0 - amount0,
+                        token1: tokens_owed1 - amount1,
+                    )
+                }
             }
             if amount0 > 0 {
                 safe_transfer(token: token0, to: recipient, value: amount0 as u256)
@@ -1885,12 +1998,17 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 safe_transfer(token: token1, to: recipient, value: amount1 as u256)
             }
             store.slot0 = store.slot0.unlock()
+            // SAFETY: Raw word accesses and views below stay within this 96-byte allocation.
             let log_data = ptr::alloc_bytes(96)
-            evm.mstore(addr: log_data, value: recipient.inner)
-            evm.mstore(addr: at(log_data, 32), value: amount0 as u256)
-            evm.mstore(addr: at(log_data, 64), value: amount1 as u256)
+            unsafe {
+                evm.mstore(addr: log_data, value: recipient.inner)
+                evm.mstore(addr: at(log_data, 32), value: amount0 as u256)
+                evm.mstore(addr: at(log_data, 64), value: amount1 as u256)
+            }
             evm.log4(
-                data: span(log_data, 96),
+                data: unsafe {
+                    span(log_data, 96)
+                },
                 topic0: COLLECT_TOPIC,
                 topic1: ctx.caller().inner,
                 topic2: int24_abi_word(tick_lower.downcast_unchecked()),
