@@ -8,7 +8,7 @@ msg TokenMsg {
 }
 
 pub fn safe_transfer(token: Address, to: Address, value: u256) uses (evm: mut Evm) {
-    let mut ret = MemBuffer::with_capacity(32)
+    var ret = MemBuffer::with_capacity(32)
     let outcome = evm
         .try_call_into(
             addr: token,
@@ -18,7 +18,7 @@ pub fn safe_transfer(token: Address, to: Address, value: u256) uses (evm: mut Ev
             ret: mut ret,
         )
     let ret_len = outcome.returndata_len()
-    let mut returned_true = false
+    var returned_true = false
     if ret_len >= 32 {
         returned_true = ret.span().word_at(0) != 0
     }

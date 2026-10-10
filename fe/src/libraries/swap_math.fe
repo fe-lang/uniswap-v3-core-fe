@@ -36,10 +36,10 @@ pub fn compute_swap_step(
 
     let zero_for_one = sqrt_ratio_current_x96 >= sqrt_ratio_target_x96
     let exact_in = amount_remaining >= 0
-    let mut sqrt_ratio_next_x96: u256 = 0
-    let mut amount_in: u256 = 0
-    let mut amount_out: u256 = 0
-    let mut fee_amount: u256 = 0
+    var sqrt_ratio_next_x96: u256 = 0
+    var amount_in: u256 = 0
+    var amount_out: u256 = 0
+    var fee_amount: u256 = 0
     let amount_remaining_abs = if exact_in {
         amount_remaining.downcast_unchecked()
     } else {

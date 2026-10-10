@@ -304,7 +304,7 @@ fn balance_of(token: Address, account: Address) -> u256
 uses (call: mut Call, evm: mut Evm)
 {
     let args = encode_packed((0x70a08231 as u32, (account.inner) as u256))
-    let mut ret = MemBuffer::with_capacity(32)
+    var ret = MemBuffer::with_capacity(32)
     let outcome = call
         .raw_staticcall(
             addr: token,
@@ -319,7 +319,7 @@ uses (call: mut Call, evm: mut Evm)
 #[arithmetic(unchecked)]
 fn factory_owner(factory: Address) -> u256 uses (call: mut Call, evm: mut Evm) {
     let args = encode_abi_payload(((0x8da5cb5b as u256) << 224,))
-    let mut ret = MemBuffer::with_capacity(32)
+    var ret = MemBuffer::with_capacity(32)
     let outcome = call
         .raw_staticcall(
             addr: factory,
@@ -336,7 +336,7 @@ fn load_deployer_parameters(deployer: Address) -> (Address, Address, Address, u3
 uses (call: mut Call, evm: mut Evm)
 {
     let args = encode_abi_payload(((0x89035730 as u256) << 224,))
-    let mut ret = MemBuffer::with_capacity(160)
+    var ret = MemBuffer::with_capacity(160)
     let outcome = call
         .raw_staticcall(
             addr: deployer,
@@ -374,11 +374,11 @@ uses (evm: mut Evm, store: mut MockTimePoolStore)
     let tick_spacing = config_tick_spacing(pool_config) as i256
     let max_liquidity = config_max_liquidity(pool_config)
 
-    let mut current_time: u32 = 0
-    let mut tick_cumulative: i256 = 0
-    let mut seconds_per_liquidity_cumulative_x128: u256 = 0
-    let mut flipped_lower = false
-    let mut flipped_upper = false
+    var current_time: u32 = 0
+    var tick_cumulative: i256 = 0
+    var seconds_per_liquidity_cumulative_x128: u256 = 0
+    var flipped_lower = false
+    var flipped_upper = false
     if liquidity_delta != 0 {
         current_time = store.time.downcast_unchecked()
         let observation = oracle::observe_single(
@@ -437,8 +437,8 @@ uses (evm: mut Evm, store: mut MockTimePoolStore)
     )
     let position_key = position::position_key(owner, tick_lower, tick_upper)
 
-    let mut amount0: u256 = 0
-    let mut amount1: u256 = 0
+    var amount0: u256 = 0
+    var amount1: u256 = 0
     let in_range = tick_current_i >= tick_lower && tick_current_i < tick_upper
     if liquidity_delta != 0 {
         let amount: u128 = if liquidity_delta < 0 {
@@ -545,9 +545,9 @@ fn call_swap_step(
     } else {
         sub_u256(a: 0, b: amount_remaining)
     }
-    let mut amount_in: u256 = 0
-    let mut amount_out: u256 = 0
-    let mut sqrt_ratio_next_x96: u256 = 0
+    var amount_in: u256 = 0
+    var amount_out: u256 = 0
+    var sqrt_ratio_next_x96: u256 = 0
     if exact_input {
         let amount_remaining_less_fee = mul_div(
             amount_remaining_abs,
@@ -671,7 +671,7 @@ uses (call: mut Call, evm: mut Evm)
     let data_len = evm.calldataload(data_start)
     assert(data_len <= calldata_size - data_start - 32)
     let data_size = 32 + (((data_len + 31) / 32) * 32)
-    let mut buf = encode_packed((selector, amount0, amount1, 96 as u256)).into_buffer()
+    var buf = encode_packed((selector, amount0, amount1, 96 as u256)).into_buffer()
     buf.reserve(data_size)
     evm.calldatacopy(
         dest: mut buf,
@@ -679,7 +679,7 @@ uses (call: mut Call, evm: mut Evm)
         src_offset: data_start,
         len: data_size,
     )
-    let mut ret = MemBuffer::empty()
+    var ret = MemBuffer::empty()
     let outcome = call
         .raw_call(
             addr: caller,
@@ -704,7 +704,7 @@ uses (call: mut Call, evm: mut Evm)
 {
     let data_len = evm.calldataload(data_start)
     let data_size = 32 + (((data_len + 31) / 32) * 32)
-    let mut buf = encode_packed(
+    var buf = encode_packed(
         (0xfa461e33 as u32, amount0_delta, amount1_delta, 96 as u256),
     )
         .into_buffer()
@@ -715,7 +715,7 @@ uses (call: mut Call, evm: mut Evm)
         src_offset: data_start,
         len: data_size,
     )
-    let mut ret = MemBuffer::empty()
+    var ret = MemBuffer::empty()
     let outcome = call
         .raw_call(
             addr: caller,
@@ -1110,9 +1110,9 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
 
             let slot0 = store.slot0
             let tick_current = slot0.tick() as i256
-            let mut tick_cumulative_inside = 0
-            let mut seconds_per_liquidity_inside_x128 = 0
-            let mut seconds_inside: u32 = 0
+            var tick_cumulative_inside = 0
+            var seconds_per_liquidity_inside_x128 = 0
+            var seconds_inside: u32 = 0
             if tick_current < lower {
                 tick_cumulative_inside = sub_i256(
                     a: tick_cumulative_lower,
@@ -1219,8 +1219,8 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             let recipient = Address { inner: evm.calldataload(4) }
             let amount0_requested = decode_u128_word(evm.calldataload(36))
             let amount1_requested = decode_u128_word(evm.calldataload(68))
-            let mut amount0 = min_u128(a: amount0_requested, b: store.protocol_fee0)
-            let mut amount1 = min_u128(a: amount1_requested, b: store.protocol_fee1)
+            var amount0 = min_u128(a: amount0_requested, b: store.protocol_fee0)
+            var amount1 = min_u128(a: amount1_requested, b: store.protocol_fee1)
 
             if amount0 > 0 {
                 if amount0 == store.protocol_fee0 {
@@ -1352,7 +1352,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 code: MSG_SPL,
                 len: 3,
             )
-            let mut slot0_next = slot0_start.lock()
+            var slot0_next = slot0_start.lock()
             store.slot0 = slot0_next
             let input_token = if zero_for_one { token0 } else { token1 }
             let output_token = if zero_for_one { token1 } else { token0 }
@@ -1362,26 +1362,26 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             let pool_config = pool_config
             let fee_pips = config_fee(pool_config) as u256
             let tick_spacing = config_tick_spacing(pool_config) as i256
-            let mut tick_cumulative: i256 = 0
-            let mut seconds_per_liquidity_cumulative_x128: u256 = 0
-            let mut computed_latest_observation = false
+            var tick_cumulative: i256 = 0
+            var seconds_per_liquidity_cumulative_x128: u256 = 0
+            var computed_latest_observation = false
 
             let exact_input = amount_specified <= MAX_I256_WORD
-            let mut amount_remaining = amount_specified
-            let mut amount_owed = 0
-            let mut amount_out_total = 0
-            let mut sqrt_price_x96 = sqrt_price_start_x96
-            let mut tick_current = tick_start as i256
+            var amount_remaining = amount_specified
+            var amount_owed = 0
+            var amount_out_total = 0
+            var sqrt_price_x96 = sqrt_price_start_x96
+            var tick_current = tick_start as i256
             let liquidity_start = store.liquidity
-            let mut liquidity_current = liquidity_start
-            let mut protocol_fees = 0
+            var liquidity_current = liquidity_start
+            var protocol_fees = 0
             let fee_protocol_word = slot0_start.fee_protocol()
             let fee_protocol = if zero_for_one {
                 fee_protocol_word & 0x0f
             } else {
                 fee_protocol_word >> 4
             }
-            let mut fee_growth_global_x128 = if zero_for_one {
+            var fee_growth_global_x128 = if zero_for_one {
                 store.fee_growth_global0_x128
             } else {
                 store.fee_growth_global1_x128
@@ -1389,7 +1389,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
 
             while amount_remaining != 0 && sqrt_price_x96 != sqrt_price_limit_x96 {
                 let sqrt_price_step_start_x96 = sqrt_price_x96
-                let (mut tick_next, initialized) = next_initialized_tick_within_one_word_at(
+                let (var tick_next, initialized) = next_initialized_tick_within_one_word_at(
                     tick: tick_current,
                     tick_spacing,
                     lte: zero_for_one,
@@ -1470,7 +1470,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                             seconds_per_liquidity_cumulative_x128 = observation.1
                             computed_latest_observation = true
                         }
-                        let mut liquidity_net = tick::cross_at(
+                        var liquidity_net = tick::cross_at(
                             tick: tick_next,
                             fee_growth_global0_x128: if zero_for_one {
                                 fee_growth_global_x128

@@ -805,7 +805,7 @@ pub contract TickOverflowSafetyEchidnaTest uses (evm: Evm) {
             assert(target_tick > OVERFLOW_MIN_TICK)
             assert(target_tick < OVERFLOW_MAX_TICK)
 
-            let mut current_tick = overflow_current_tick()
+            var current_tick = overflow_current_tick()
             while current_tick != target_tick {
                 if current_tick < target_tick {
                     let next_tick = current_tick + 1

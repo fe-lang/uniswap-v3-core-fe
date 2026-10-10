@@ -18,7 +18,7 @@ fn int24_word(_ value: i32) -> u256 {
 fn pool_salt(token0: Address, token1: Address, fee: u32, tick_spacing: i32) -> u256 {
     let packed = (((fee as u256) << 24) | int24_word(tick_spacing)) << 208
     let suffix = encode_abi_payload(packed)
-    let mut salt = Packed::with_capacity(bytes: 46)
+    var salt = Packed::with_capacity(bytes: 46)
     salt.address(token0)
     salt.address(token1)
     salt.append_span(suffix.span().head(6))

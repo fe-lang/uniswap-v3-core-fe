@@ -17,7 +17,7 @@ pub fn get_sqrt_ratio_at_tick(tick: i256) -> u256 {
     }
     assert!(abs_tick <= MAX_TICK.downcast_unchecked(), "T")
 
-    let mut ratio = if (abs_tick & 0x1) != 0 {
+    var ratio = if (abs_tick & 0x1) != 0 {
         0xfffcb933bd6fad37aa2d162d1a594001
     } else {
         0x100000000000000000000000000000000
@@ -94,8 +94,8 @@ pub fn get_tick_at_sqrt_ratio(sqrt_price_x96: u256) -> i256 {
         "R",
     )
     let ratio = sqrt_price_x96 << 32
-    let mut r = ratio
-    let mut msb: u256 = 0
+    var r = ratio
+    var msb: u256 = 0
 
     let f128 = ((r > 0xffffffffffffffffffffffffffffffff) as u256) << 7
     msb = msb | f128
@@ -135,7 +135,7 @@ pub fn get_tick_at_sqrt_ratio(sqrt_price_x96: u256) -> i256 {
     }
 
     let msb_i: i256 = msb.downcast_unchecked()
-    let mut log_2: i256 = (msb_i - 128) << 64
+    var log_2: i256 = (msb_i - 128) << 64
     r = (r * r) >> 127
     let f63 = r >> 128
     let f63_i: i256 = f63.downcast_unchecked()

@@ -252,7 +252,7 @@ pub fn grow(current: u16, next: u16, observations: mut Observations) -> u16 {
     if next <= current {
         return current
     }
-    let mut i = current
+    var i = current
     while i < next {
         observations[i as usize] = (observations[i as usize] & !MAX_U32) | 1
         i += 1
@@ -302,8 +302,8 @@ fn binary_search(
     cardinality: u16,
     observations: ref Observations,
 ) -> (Observation, Observation) {
-    let mut l = ((index + 1) % cardinality) as u256
-    let mut r = l + (cardinality as u256) - 1
+    var l = ((index + 1) % cardinality) as u256
+    var r = l + (cardinality as u256) - 1
     while true {
         let i = (l + r) / 2
         let before_or_at = read_observation(
@@ -368,7 +368,7 @@ fn surrounding_observations(
         )
     }
 
-    let mut oldest = read_observation(
+    var oldest = read_observation(
         ((index + 1) % cardinality) as u256,
         observations: ref observations,
     )
@@ -398,7 +398,7 @@ pub fn observe_single(
 ) -> (i256, u256) {
     assert!(cardinality > 0, "I")
     if seconds_ago == 0 {
-        let mut last = read_observation(index as u256, observations: ref observations)
+        var last = read_observation(index as u256, observations: ref observations)
         if last.block_timestamp != time {
             last = transform(last, block_timestamp: time, tick, liquidity)
         }
@@ -464,12 +464,12 @@ uses (evm: Evm)
     let len = evm.calldataload(elements_offset - 32)
     assert(len <= (calldata_size - elements_offset) / 32)
     let second_offset = 96 + len * 32
-    let mut out = MemBuffer::with_capacity(128 + len * 64)
+    var out = MemBuffer::with_capacity(128 + len * 64)
     out.write_word(offset: 0, value: 64)
     out.write_word(offset: 32, value: second_offset)
     out.write_word(offset: 64, value: len)
     out.write_word(offset: second_offset, value: len)
-    let mut i: u256 = 0
+    var i: u256 = 0
     while i < len {
         let seconds_word = evm.calldataload(elements_offset + i * 32)
         let seconds_ago: u32 = seconds_word.downcast_unchecked()
@@ -711,7 +711,7 @@ uses (store: OracleStore)
     )
     let numerator = tick_cumulative1 - tick_cumulative0
     let seconds_ago_i = seconds_ago as i256
-    let mut time_weighted_tick = numerator / seconds_ago_i
+    var time_weighted_tick = numerator / seconds_ago_i
     if numerator < 0 && numerator % seconds_ago_i != 0 {
         time_weighted_tick = time_weighted_tick - 1
     }

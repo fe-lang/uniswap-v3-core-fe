@@ -145,8 +145,8 @@ pub fn get_amount0_delta(
     assert(sqrt_ratio_a_x96 <= MAX_U160)
     assert(sqrt_ratio_b_x96 <= MAX_U160)
 
-    let mut sqrt_ratio_lower = sqrt_ratio_a_x96
-    let mut sqrt_ratio_upper = sqrt_ratio_b_x96
+    var sqrt_ratio_lower = sqrt_ratio_a_x96
+    var sqrt_ratio_upper = sqrt_ratio_b_x96
     if sqrt_ratio_lower > sqrt_ratio_upper {
         sqrt_ratio_lower = sqrt_ratio_b_x96
         sqrt_ratio_upper = sqrt_ratio_a_x96
@@ -177,8 +177,8 @@ pub fn get_amount1_delta(
     assert(sqrt_ratio_a_x96 <= MAX_U160)
     assert(sqrt_ratio_b_x96 <= MAX_U160)
 
-    let mut sqrt_ratio_lower = sqrt_ratio_a_x96
-    let mut sqrt_ratio_upper = sqrt_ratio_b_x96
+    var sqrt_ratio_lower = sqrt_ratio_a_x96
+    var sqrt_ratio_upper = sqrt_ratio_b_x96
     if sqrt_ratio_lower > sqrt_ratio_upper {
         sqrt_ratio_lower = sqrt_ratio_b_x96
         sqrt_ratio_upper = sqrt_ratio_a_x96
