@@ -1,20 +1,24 @@
 # Fe MVS port
 
-Build with Fe commit `eeedc2db6e1d93ba3c2bd9d935ccefa9ced21486` on
-[`v3-buffer-writer-20261010`](https://github.com/sbillig/fe/tree/v3-buffer-writer-20261010).
-It extends MVS `c329ceff361ae1e26d3b9a07358146bb53faa3b2` with checked
-`MemBuffer.write_word` and pins Sonatina
-`361e0e86a88413f12e0ef1cb16b7ef75bbb10034` in Cargo.lock. Use the explicit
-compiler path; an installed Fe release may use a different API.
+Build with Fe
+[`8b904587cfe81322ac5897695b24feb650eee7d6`](https://github.com/sbillig/fe/commit/8b904587cfe81322ac5897695b24feb650eee7d6),
+based on current master `33ee9be2820f2d296e6d9c7a9d3f6f081a5f1959`.
+It adds the ABI metadata fix in [Fe PR #1807](https://github.com/argotorg/fe/pull/1807),
+which keeps built-in errors implicit so ethers can load generated ABIs.
+That PR is a compiler prerequisite; the port does not filter ABI errors.
+Mutable value semantics and checked `MemBuffer.write_word` are already in
+master. Committed Cargo dependencies pin Sonatina
+`cdb34cbb9563333cde4d2c64b594a0807d23e80c`. Use the explicit compiler path;
+an installed Fe release may use a different API.
 
 ```sh
-git clone https://github.com/sbillig/fe.git /tmp/fe-v3-mvs
-git -C /tmp/fe-v3-mvs checkout eeedc2db6e1d93ba3c2bd9d935ccefa9ced21486
-(cd /tmp/fe-v3-mvs && cargo build --release --locked -p fe --all-features -j 2)
+git clone https://github.com/sbillig/fe.git /tmp/fe-v3-master
+git -C /tmp/fe-v3-master checkout 8b904587cfe81322ac5897695b24feb650eee7d6
+(cd /tmp/fe-v3-master && cargo build --release --locked -p fe -j 2)
 
 # From this repository, using Yarn 1.22.22:
 yarn install --frozen-lockfile --ignore-scripts
-FE_BIN=/tmp/fe-v3-mvs/target/release/fe yarn compile:fe
+FE_BIN=/tmp/fe-v3-master/target/release/fe yarn compile:fe
 yarn compile
 FE_ARTIFACTS=1 yarn test --no-compile
 yarn tsc --noEmit
@@ -22,9 +26,21 @@ yarn tsc --noEmit
 
 The bridge builds 31 Fe artifacts with size optimization (`FE_OPTIMIZE=s`).
 The Fe-backed Hardhat suite uses Osaka and enforces the contract size limit.
-The verified result is **986 passing, 95 pending**. Of the pending cases, 75
-require the unavailable Fe `black_box` builtin; 20 were already pending.
-The eight canonical oracle-encoding tests also pass with Solidity fixtures.
+The pinned compiler builds all 31 bridge artifacts. Runtime sizes are 16,548 bytes
+for UniswapV3Pool, 16,770 for the mock pool, 18,455 for the factory, and 2,976
+for OracleTest. All are below the 24,576-byte EIP-170 limit.
+
+The full Fe-backed suite passes: **986 passing, 95 pending, zero failing**.
+Of the pending cases, 75 require the unavailable Fe `black_box` builtin;
+20 were already pending. TypeScript checking passes with ethers 5.8 and its
+aligned dependencies.
+
+The compiler ABI fix keeps `Panic(uint256)` and `Error(string)` implicit;
+no ABI filtering or additional overrides are applied in the bridge. All 31
+bridge ABIs match the previous port, and the ABI fix leaves all 62 init/runtime
+bytecode artifacts unchanged. The default Solidity suite retains its documented
+baseline: 1,037 passing, 20 pending, 24 failing (23 gas snapshots differ by
+12 gas and one Echidna arithmetic invariant fails).
 
 ## Current MVS syntax
 
@@ -45,10 +61,6 @@ let info = mut store.positions[position_key]
 This migration changes 109 value bindings across 13 files. Explicit storage
 accesses remain `ref`/`mut`; no unsafe access is added to the v3 sources.
 
-Current runtime sizes are 16,744 bytes for UniswapV3Pool, 16,822 for the mock
-pool, 18,554 for the factory, and 3,114 for OracleTest. All 31 ABIs are unchanged.
-The suite enforces the 24,576-byte contract limit with this compiler checkpoint.
-
 ## Single-buffer oracle encoding
 
 `OracleTest.observe` and the pools encode both result arrays directly into one
@@ -61,10 +73,11 @@ history results and repeated, out-of-order queries. The first two gas columns
 are the historical matched-compiler comparison using Fe `cf82c10c7` and Sonatina
 `361e0e86`: baseline port `0c3a2de` versus single-buffer port `fe08f92`. All 31
 baseline artifacts were verified byte-for-byte against the compiler without the
-writer before measuring that source change. The final column is freshly measured
-with this latest-MVS syntax checkpoint and includes its standard library changes.
+writer before measuring that source change. The final column was measured on
+October 10 with Fe `eeedc2db6` / Sonatina
+`361e0e86` and includes that checkpoint's standard library changes.
 
-| Queries | Baseline, cf82c10c7 | Single buffer, cf82c10c7 | Current MVS |
+| Queries | Baseline, cf82c10c7 | Single buffer, cf82c10c7 | October 10 MVS |
 | ---: | ---: | ---: | ---: |
 | 0 | 26,543 | 24,898 | 24,889 |
 | 1 | 30,193 | 28,407 | 28,398 |
@@ -77,8 +90,7 @@ with this latest-MVS syntax checkpoint and includes its standard library changes
 
 The historical single-buffer change saves 5.9–8.4% across these cases (first
 two gas columns), with OracleTest runtime 3,119 → 2,954 bytes on that compiler.
-The current checkpoint uses a newer compiler and is a separate measurement.
-No master compiler testing was performed.
+These historical measurements are separate from the current master refresh.
 
 To print the measurements for the checked-out source:
 

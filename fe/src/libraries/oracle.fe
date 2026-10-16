@@ -357,15 +357,13 @@ fn surrounding_observations(
             )
         }
 
-        return (
-            before_or_at,
-            transform(
-                last: before_or_at,
-                block_timestamp: target,
-                tick,
-                liquidity,
-            ),
+        let at_or_after = transform(
+            last: before_or_at,
+            block_timestamp: target,
+            tick,
+            liquidity,
         )
+        return (before_or_at, at_or_after)
     }
 
     var oldest = read_observation(
