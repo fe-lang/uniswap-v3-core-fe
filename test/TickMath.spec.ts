@@ -2,7 +2,7 @@ import { BigNumber } from 'ethers'
 import { ethers } from 'hardhat'
 import { TickMathTest } from '../typechain/TickMathTest'
 import { expect } from './shared/expect'
-import { getContractFactory } from './shared/feArtifacts'
+import { getContractFactory, itWithBlackBox } from './shared/feArtifacts'
 import snapshotGasCost from './shared/snapshotGasCost'
 import { encodePriceSqrt, MIN_SQRT_RATIO, MAX_SQRT_RATIO } from './shared/utilities'
 import Decimal from 'decimal.js'
@@ -80,7 +80,7 @@ describe('TickMath', () => {
           it('result', async () => {
             expect((await tickMath.getSqrtRatioAtTick(tick)).toString()).to.matchSnapshot()
           })
-          it('gas', async () => {
+          itWithBlackBox('gas', async () => {
             await snapshotGasCost(tickMath.getGasCostOfGetSqrtRatioAtTick(tick))
           })
         })
@@ -158,7 +158,7 @@ describe('TickMath', () => {
         it('result', async () => {
           expect(await tickMath.getTickAtSqrtRatio(ratio)).to.matchSnapshot()
         })
-        it('gas', async () => {
+        itWithBlackBox('gas', async () => {
           await snapshotGasCost(tickMath.getGasCostOfGetTickAtSqrtRatio(ratio))
         })
       })

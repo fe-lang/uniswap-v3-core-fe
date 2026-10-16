@@ -107,6 +107,72 @@ describe('UniswapV3Pool', () => {
     pool = await createPool(FeeAmount.MEDIUM, TICK_SPACINGS[FeeAmount.MEDIUM])
   })
 
+  it('keeps pool scalars and map entries in their Solidity slots without interference', async () => {
+    await pool.initialize(encodePriceSqrt(1, 1))
+    await pool.setFeeProtocol(6, 6)
+    await mint(wallet.address, -tickSpacing, tickSpacing, expandTo18Decimals(1))
+    await mint(other.address, -2 * tickSpacing, 2 * tickSpacing, 333)
+    await swapExact0For1(1000000, wallet.address)
+    await pool.burn(-tickSpacing, tickSpacing, 100)
+
+    expect(BigNumber.from(await ethers.provider.getStorageAt(pool.address, 1))).to.eq(await pool.feeGrowthGlobal0X128())
+    expect(BigNumber.from(await ethers.provider.getStorageAt(pool.address, 2))).to.eq(await pool.feeGrowthGlobal1X128())
+    const protocol = await pool.protocolFees()
+    expect(BigNumber.from(await ethers.provider.getStorageAt(pool.address, 3))).to.eq(
+      protocol.token0.add(protocol.token1.shl(128))
+    )
+    expect(BigNumber.from(await ethers.provider.getStorageAt(pool.address, 4))).to.eq(await pool.liquidity())
+
+    // Signed keys and packed tick records retain Solidity's root and lanes.
+    for (const tick of [-2 * tickSpacing, -tickSpacing, tickSpacing, 2 * tickSpacing]) {
+      const info = await pool.ticks(tick)
+      const base = BigNumber.from(utils.keccak256(utils.defaultAbiCoder.encode(['int256', 'uint256'], [tick, 5])))
+      const words = await Promise.all(
+        [0, 1, 2, 3].map((offset) => ethers.provider.getStorageAt(pool.address, base.add(offset)))
+      )
+      expect(BigNumber.from(words[0])).to.eq(info.liquidityGross.add(info.liquidityNet.toTwos(128).shl(128)))
+      expect(BigNumber.from(words[1])).to.eq(info.feeGrowthOutside0X128)
+      expect(BigNumber.from(words[2])).to.eq(info.feeGrowthOutside1X128)
+      expect(BigNumber.from(words[3])).to.eq(
+        info.tickCumulativeOutside
+          .toTwos(56)
+          .add(info.secondsPerLiquidityOutsideX128.shl(56))
+          .add(BigNumber.from(info.secondsOutside).shl(216))
+          .add(BigNumber.from(info.initialized ? 1 : 0).shl(248))
+      )
+    }
+    for (const word of [-1, 0]) {
+      const slot = utils.keccak256(utils.defaultAbiCoder.encode(['int256', 'uint256'], [word, 6]))
+      expect(BigNumber.from(await ethers.provider.getStorageAt(pool.address, slot))).to.eq(await pool.tickBitmap(word))
+    }
+
+    const checkWords = async (owner: string, lower: number, upper: number) => {
+      const key = getPositionKey(owner, lower, upper)
+      const entry = await pool.positions(key)
+      const base = BigNumber.from(utils.keccak256(utils.defaultAbiCoder.encode(['bytes32', 'uint256'], [key, 7])))
+      const words = await Promise.all(
+        [0, 1, 2, 3].map((offset) => ethers.provider.getStorageAt(pool.address, base.add(offset)))
+      )
+      expect(BigNumber.from(words[0])).to.eq(entry.liquidity)
+      expect(BigNumber.from(words[1])).to.eq(entry.feeGrowthInside0LastX128)
+      expect(BigNumber.from(words[2])).to.eq(entry.feeGrowthInside1LastX128)
+      expect(BigNumber.from(words[3])).to.eq(entry.tokensOwed0.add(entry.tokensOwed1.shl(128)))
+      return entry
+    }
+
+    const otherBefore = await checkWords(other.address, -2 * tickSpacing, 2 * tickSpacing)
+    const protocolBefore = await pool.protocolFees()
+    const liquidityBefore = await pool.liquidity()
+    await checkWords(wallet.address, -tickSpacing, tickSpacing)
+    await pool.collect(wallet.address, -tickSpacing, tickSpacing, MaxUint128, MaxUint128)
+    const collected = await checkWords(wallet.address, -tickSpacing, tickSpacing)
+    expect(collected.tokensOwed0).to.eq(0)
+    expect(collected.tokensOwed1).to.eq(0)
+    expect(await checkWords(other.address, -2 * tickSpacing, 2 * tickSpacing)).to.deep.eq(otherBefore)
+    expect(await pool.protocolFees()).to.deep.eq(protocolBefore)
+    expect(await pool.liquidity()).to.eq(liquidityBefore)
+  })
+
   it('constructor initializes immutables', async () => {
     expect(await pool.factory()).to.eq(factory.address)
     expect(await pool.token0()).to.eq(token0.address)
@@ -119,7 +185,10 @@ describe('UniswapV3Pool', () => {
     const MockTimeUniswapV3PoolFactory = await getContractFactory('MockTimeUniswapV3Pool')
     const deployer = (await MockTimeUniswapV3PoolDeployerFactory.deploy()) as MockTimeUniswapV3PoolDeployer
     const salt = utils.keccak256(
-      utils.solidityPack(['address', 'address', 'uint24', 'int24'], [token0.address, token1.address, feeAmount, tickSpacing])
+      utils.solidityPack(
+        ['address', 'address', 'uint24', 'int24'],
+        [token0.address, token1.address, feeAmount, tickSpacing]
+      )
     )
     const expectedAddress = utils.getCreate2Address(
       deployer.address,
@@ -131,7 +200,7 @@ describe('UniswapV3Pool', () => {
     const receipt = await tx.wait()
     const poolAddress = receipt.events?.[0].args?.pool as string
 
-    if (!usingFeArtifacts) expect(poolAddress).to.eq(expectedAddress)
+    expect(poolAddress).to.eq(expectedAddress)
     const params = await deployer.parameters()
     expect(params.factory).to.eq(constants.AddressZero)
     expect(params.token0).to.eq(constants.AddressZero)
@@ -675,6 +744,151 @@ describe('UniswapV3Pool', () => {
     const [min, max] = [getMinTick(tickSpacing), getMaxTick(tickSpacing)]
     await mint(wallet.address, min, max, initializeLiquidityAmount)
   }
+
+  describe('oracle history', () => {
+    const liquidity = BigNumber.from(2).pow(64)
+    const perSecond = BigNumber.from(2).pow(64)
+
+    it('reserves one packed word per observation and initializes grown slots', async () => {
+      expect((await pool.observations(0)).initialized).to.eq(false)
+      await pool.initialize(encodePriceSqrt(1, 1))
+      await pool.increaseObservationCardinalityNext(3)
+      expect(BigNumber.from(await ethers.provider.getStorageAt(pool.address, 8))).to.eq(
+        BigNumber.from(TEST_POOL_START_TIME).add(BigNumber.from(1).shl(248))
+      )
+      for (const index of [1, 2]) {
+        checkObservationEquals(await pool.observations(index), {
+          blockTimestamp: 1,
+          tickCumulative: 0,
+          secondsPerLiquidityCumulativeX128: 0,
+          initialized: false,
+        })
+        expect(BigNumber.from(await ethers.provider.getStorageAt(pool.address, 8 + index))).to.eq(1)
+      }
+      expect(BigNumber.from(await ethers.provider.getStorageAt(pool.address, 65543))).to.eq(await pool.time())
+      await expect(pool.observations(65535)).to.be.reverted
+    })
+
+    it('grows, rotates, and interpolates every requested history window', async () => {
+      await pool.initialize(encodePriceSqrt(1, 1))
+      await pool.increaseObservationCardinalityNext(3)
+      await mint(wallet.address, -tickSpacing, tickSpacing, liquidity)
+      await pool.advanceTime(10)
+      await mint(wallet.address, -tickSpacing, tickSpacing, liquidity)
+      expect((await pool.slot0()).observationIndex).to.eq(1)
+      expect((await pool.slot0()).observationCardinality).to.eq(3)
+      await pool.advanceTime(10)
+      await pool.burn(-tickSpacing, tickSpacing, liquidity)
+      expect((await pool.slot0()).observationIndex).to.eq(2)
+      await pool.advanceTime(10)
+      await mint(wallet.address, -tickSpacing, tickSpacing, liquidity)
+      expect((await pool.slot0()).observationIndex).to.eq(0)
+      const result = await pool.observe([0, 5, 10, 15, 20, 5])
+      expect(result.tickCumulatives.map(String)).to.deep.eq(['0', '0', '0', '0', '0', '0'])
+      expect(result.secondsPerLiquidityCumulativeX128s.map(String)).to.deep.eq(
+        [25, 20, 15, 12.5, 10, 20].map((n) =>
+          perSecond
+            .mul(n * 2)
+            .div(2)
+            .toString()
+        )
+      )
+      await expect(pool.observe([21])).to.be.revertedWith('OLD')
+      expect((await pool.observe([])).tickCumulatives).to.deep.eq([])
+      for (const index of [0, 1, 2]) {
+        const observation = await pool.observations(index)
+        const expected = BigNumber.from(observation.blockTimestamp)
+          .add(observation.tickCumulative.toTwos(56).shl(32))
+          .add(observation.secondsPerLiquidityCumulativeX128.shl(88))
+          .add(BigNumber.from(1).shl(248))
+        expect(BigNumber.from(await ethers.provider.getStorageAt(pool.address, 8 + index))).to.eq(expected)
+      }
+    })
+
+    it('records the pre-swap tick and writes at most once per timestamp', async () => {
+      await pool.initialize(encodePriceSqrt(1, 1))
+      await pool.increaseObservationCardinalityNext(4)
+      await mint(wallet.address, -tickSpacing, tickSpacing, liquidity)
+      await pool.advanceTime(4)
+      await swapExact0For1(1000, wallet.address)
+      const tick = (await pool.slot0()).tick
+      expect(tick).to.eq(-1)
+      expect((await pool.slot0()).observationIndex).to.eq(1)
+      expect((await pool.observations(1)).tickCumulative).to.eq(0)
+      await mint(wallet.address, -tickSpacing, tickSpacing, 100)
+      expect((await pool.slot0()).observationIndex).to.eq(1)
+      await pool.advanceTime(6)
+      await pool.burn(-tickSpacing, tickSpacing, 100)
+      expect((await pool.slot0()).observationIndex).to.eq(2)
+      expect((await pool.observations(2)).tickCumulative).to.eq(-6)
+      await pool.advanceTime(5)
+      const result = await pool.observe([0, 3, 5, 8, 11, 15])
+      expect(result.tickCumulatives.map(String)).to.deep.eq(['-11', '-8', '-6', '-3', '0', '0'])
+    })
+
+    it('queries history across the uint32 timestamp rollover', async () => {
+      await pool.advanceTime(BigNumber.from(2).pow(32).sub(TEST_POOL_START_TIME).sub(5))
+      await pool.initialize(encodePriceSqrt(1, 1))
+      await pool.increaseObservationCardinalityNext(3)
+      await mint(wallet.address, -tickSpacing, tickSpacing, liquidity)
+      await pool.advanceTime(10)
+      await mint(wallet.address, -tickSpacing, tickSpacing, 1)
+      expect((await pool.observations(1)).blockTimestamp).to.eq(5)
+      const result = await pool.observe([0, 5, 10])
+      expect(result.tickCumulatives.map(String)).to.deep.eq(['0', '0', '0'])
+      expect(result.secondsPerLiquidityCumulativeX128s.map(String)).to.deep.eq(
+        [10, 5, 0].map((n) => perSecond.mul(n).toString())
+      )
+      await expect(pool.observe([11])).to.be.revertedWith('OLD')
+    })
+
+    it('wraps uint160 seconds per liquidity in stored and counterfactual observations', async () => {
+      await pool.initialize(encodePriceSqrt(1, 1))
+      await pool.increaseObservationCardinalityNext(3)
+      await mint(wallet.address, -tickSpacing, tickSpacing, 1)
+      const elapsed = BigNumber.from(2).pow(32).sub(1)
+      const mask = BigNumber.from(2).pow(160).sub(1)
+      await pool.advanceTime(elapsed)
+      await mint(wallet.address, -tickSpacing, tickSpacing, 1)
+      await pool.burn(-tickSpacing, tickSpacing, 1)
+      await pool.advanceTime(elapsed)
+      const expected = elapsed.mul(2).shl(128).and(mask)
+      expect((await pool.observe([0])).secondsPerLiquidityCumulativeX128s[0]).to.eq(expected)
+      await mint(wallet.address, -tickSpacing, tickSpacing, 1)
+      expect((await pool.observations(2)).secondsPerLiquidityCumulativeX128).to.eq(expected)
+    })
+
+    it('wraps int56 tick accumulators before historical interpolation', async () => {
+      const math = await (await getContractFactory('TickMathTest')).deploy()
+      await pool.initialize(await math.getSqrtRatioAtTick(887000))
+      await pool.increaseObservationCardinalityNext(3)
+      await mint(wallet.address, 886980, 887040, liquidity)
+      const elapsed = BigNumber.from(2).pow(32).sub(1)
+      for (let i = 0; i < 10; i++) {
+        await pool.advanceTime(elapsed)
+        await mint(wallet.address, 886980, 887040, 1)
+      }
+      const cumulative = elapsed.mul(887000).mul(10).toTwos(56).fromTwos(56)
+      expect((await pool.observe([0, 1])).tickCumulatives.map(String)).to.deep.eq([
+        cumulative.toString(),
+        cumulative.sub(887000).toTwos(56).fromTwos(56).toString(),
+      ])
+      await pool.advanceTime(elapsed)
+      const counterfactual = elapsed.mul(887000).mul(11).toTwos(56).fromTwos(56)
+      expect((await pool.observe([0])).tickCumulatives[0]).to.eq(counterfactual)
+    })
+  })
+
+  describe('flash callback payload', () => {
+    for (const length of [0, 1, 31, 32, 33, 95, 96, 97, 256]) {
+      it(`preserves all ${length} bytes`, async () => {
+        await initializeAtZeroTick(pool)
+        const receiver = await (await ethers.getContractFactory('TestUniswapV3FlashData')).deploy()
+        const data = utils.hexlify(Array.from({ length }, (_, i) => (17 + i * 31) % 256))
+        await expect(receiver.flash(pool.address, data)).to.emit(receiver, 'FlashData').withArgs(data)
+      })
+    }
+  })
 
   describe('#observe', () => {
     beforeEach(() => initializeAtZeroTick(pool))

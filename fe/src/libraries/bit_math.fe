@@ -1,5 +1,5 @@
+// Gas measurement entrypoints are disabled until MVS supports core::hint::black_box.
 use std::abi::sol
-use std::evm::{Ctx, Evm}
 
 const MASK_U128: u256 = 0xffffffffffffffffffffffffffffffff
 const MASK_U64: u256 = 0xffffffffffffffff
@@ -12,8 +12,8 @@ const MASK_U8: u256 = 0xff
 pub fn most_significant_bit(_ x: u256) -> u8 {
     assert(x > 0)
 
-    let mut value = x
-    let mut r: u256 = 0
+    var value = x
+    var r: u256 = 0
 
     if value >= (1 << 128) {
         value = value >> 128
@@ -55,8 +55,8 @@ pub fn most_significant_bit(_ x: u256) -> u8 {
 pub fn least_significant_bit(_ x: u256) -> u8 {
     assert(x > 0)
 
-    let mut value = x
-    let mut r: u256 = 0
+    var value = x
+    var r: u256 = 0
 
     r = 255
     if (value & MASK_U128) > 0 {
@@ -105,14 +105,8 @@ msg BitMathTestMsg {
     #[selector = sol("mostSignificantBit(uint256)")]
     MostSignificantBit { x: u256 } -> u8,
 
-    #[selector = sol("getGasCostOfMostSignificantBit(uint256)")]
-    GetGasCostOfMostSignificantBit { x: u256 } -> u256,
-
     #[selector = sol("leastSignificantBit(uint256)")]
     LeastSignificantBit { x: u256 } -> u8,
-
-    #[selector = sol("getGasCostOfLeastSignificantBit(uint256)")]
-    GetGasCostOfLeastSignificantBit { x: u256 } -> u256,
 }
 
 msg BitMathEchidnaTestMsg {
@@ -123,30 +117,14 @@ msg BitMathEchidnaTestMsg {
     LeastSignificantBitInvariant { input: u256 },
 }
 
-pub contract BitMathTest uses (evm: Evm) {
+pub contract BitMathTest {
     recv BitMathTestMsg {
         MostSignificantBit { x } -> u8 {
             most_significant_bit(x)
         }
 
-        GetGasCostOfMostSignificantBit { x } -> u256
-        uses (evm)
-        {
-            let gas_before = evm.gas()
-            most_significant_bit(x)
-            gas_before - evm.gas()
-        }
-
         LeastSignificantBit { x } -> u8 {
             least_significant_bit(x)
-        }
-
-        GetGasCostOfLeastSignificantBit { x } -> u256
-        uses (evm)
-        {
-            let gas_before = evm.gas()
-            least_significant_bit(x)
-            gas_before - evm.gas()
         }
     }
 }

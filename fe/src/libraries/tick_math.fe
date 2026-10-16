@@ -1,5 +1,5 @@
+// Gas measurement entrypoints are disabled until MVS supports core::hint::black_box.
 use std::abi::sol::{self, Int24, Uint160}
-use std::evm::Evm
 
 pub const MIN_TICK: i256 = -887272
 pub const MAX_TICK: i256 = 887272
@@ -17,7 +17,7 @@ pub fn get_sqrt_ratio_at_tick(tick: i256) -> u256 {
     }
     assert!(abs_tick <= MAX_TICK.downcast_unchecked(), "T")
 
-    let mut ratio = if (abs_tick & 0x1) != 0 {
+    var ratio = if (abs_tick & 0x1) != 0 {
         0xfffcb933bd6fad37aa2d162d1a594001
     } else {
         0x100000000000000000000000000000000
@@ -94,8 +94,8 @@ pub fn get_tick_at_sqrt_ratio(sqrt_price_x96: u256) -> i256 {
         "R",
     )
     let ratio = sqrt_price_x96 << 32
-    let mut r = ratio
-    let mut msb: u256 = 0
+    var r = ratio
+    var msb: u256 = 0
 
     let f128 = ((r > 0xffffffffffffffffffffffffffffffff) as u256) << 7
     msb = msb | f128
@@ -135,7 +135,7 @@ pub fn get_tick_at_sqrt_ratio(sqrt_price_x96: u256) -> i256 {
     }
 
     let msb_i: i256 = msb.downcast_unchecked()
-    let mut log_2: i256 = (msb_i - 128) << 64
+    var log_2: i256 = (msb_i - 128) << 64
     r = (r * r) >> 127
     let f63 = r >> 128
     let f63_i: i256 = f63.downcast_unchecked()
@@ -246,14 +246,8 @@ msg TickMathTestMsg {
     #[selector = 0x986cfba3]
     GetSqrtRatioAtTick { tick: i256 } -> u256,
 
-    #[selector = 0xa7398eb4]
-    GetGasCostOfGetSqrtRatioAtTick { tick: i256 } -> u256,
-
     #[selector = 0x4f76c058]
     GetTickAtSqrtRatio { sqrtPriceX96: u256 } -> i256,
-
-    #[selector = 0xb0622f67]
-    GetGasCostOfGetTickAtSqrtRatio { sqrtPriceX96: u256 } -> u256,
 
     #[selector = 0xee8847ff]
     MinSqrtRatio -> u256,
@@ -262,30 +256,14 @@ msg TickMathTestMsg {
     MaxSqrtRatio -> u256,
 }
 
-pub contract TickMathTest uses (evm: Evm) {
+pub contract TickMathTest {
     recv TickMathTestMsg {
         GetSqrtRatioAtTick { tick } -> u256 {
             get_sqrt_ratio_at_tick(tick)
         }
 
-        GetGasCostOfGetSqrtRatioAtTick { tick } -> u256
-        uses (evm)
-        {
-            let gas_before = evm.gas()
-            get_sqrt_ratio_at_tick(tick)
-            gas_before - evm.gas()
-        }
-
         GetTickAtSqrtRatio { sqrtPriceX96 } -> i256 {
             get_tick_at_sqrt_ratio(sqrt_price_x96: sqrtPriceX96)
-        }
-
-        GetGasCostOfGetTickAtSqrtRatio { sqrtPriceX96 } -> u256
-        uses (evm)
-        {
-            let gas_before = evm.gas()
-            get_tick_at_sqrt_ratio(sqrt_price_x96: sqrtPriceX96)
-            gas_before - evm.gas()
         }
 
         MinSqrtRatio -> u256 {

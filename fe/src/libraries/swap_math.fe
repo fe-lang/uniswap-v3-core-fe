@@ -1,5 +1,5 @@
+// Gas measurement entrypoints are disabled until MVS supports core::hint::black_box.
 use std::abi::sol::{self, Uint24, Uint160}
-use std::evm::Evm
 use super::full_math::{mul_div, mul_div_rounding_up}
 use super::sqrt_price_math::{
     get_amount0_delta,
@@ -36,10 +36,10 @@ pub fn compute_swap_step(
 
     let zero_for_one = sqrt_ratio_current_x96 >= sqrt_ratio_target_x96
     let exact_in = amount_remaining >= 0
-    let mut sqrt_ratio_next_x96: u256 = 0
-    let mut amount_in: u256 = 0
-    let mut amount_out: u256 = 0
-    let mut fee_amount: u256 = 0
+    var sqrt_ratio_next_x96: u256 = 0
+    var amount_in: u256 = 0
+    var amount_out: u256 = 0
+    var fee_amount: u256 = 0
     let amount_remaining_abs = if exact_in {
         amount_remaining.downcast_unchecked()
     } else {
@@ -179,18 +179,9 @@ msg SwapMathTestMsg {
         amountRemaining: i256,
         feePips: u256,
     } -> (u256, u256, u256, u256),
-
-    #[selector = 0xd28c51b7]
-    GetGasCostOfComputeSwapStep {
-        sqrtP: u256,
-        sqrtPTarget: u256,
-        liquidity: u128,
-        amountRemaining: i256,
-        feePips: u256,
-    } -> u256,
 }
 
-pub contract SwapMathTest uses (evm: Evm) {
+pub contract SwapMathTest {
     recv SwapMathTestMsg {
         ComputeSwapStep { sqrtP, sqrtPTarget, liquidity, amountRemaining, feePips } -> (
             u256,
@@ -205,26 +196,6 @@ pub contract SwapMathTest uses (evm: Evm) {
                 amount_remaining: amountRemaining,
                 fee_pips: feePips,
             )
-        }
-
-        GetGasCostOfComputeSwapStep {
-            sqrtP,
-            sqrtPTarget,
-            liquidity,
-            amountRemaining,
-            feePips,
-        } -> u256
-        uses (evm)
-        {
-            let gas_before = evm.gas()
-            compute_swap_step(
-                sqrt_ratio_current_x96: sqrtP,
-                sqrt_ratio_target_x96: sqrtPTarget,
-                liquidity,
-                amount_remaining: amountRemaining,
-                fee_pips: feePips,
-            )
-            gas_before - evm.gas()
         }
     }
 }

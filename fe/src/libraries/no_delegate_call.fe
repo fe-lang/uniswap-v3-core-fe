@@ -1,4 +1,5 @@
-use std::evm::{Address, Ctx, Evm}
+// Gas measurement entrypoints are disabled until MVS supports core::hint::black_box.
+use std::evm::{Address, Ctx}
 
 fn check_not_delegate_call(_ original: Address) uses (ctx: Ctx) {
     assert(ctx.address() == original)
@@ -24,17 +25,11 @@ msg NoDelegateCallTestMsg {
     #[selector = 0x423ecb05]
     CannotBeDelegateCalled -> u256,
 
-    #[selector = 0x3045a6e0]
-    GetGasCostOfCanBeDelegateCalled -> u256,
-
-    #[selector = 0x3c7c8dd0]
-    GetGasCostOfCannotBeDelegateCalled -> u256,
-
     #[selector = 0x64270164]
     CallsIntoNoDelegateCallFunction,
 }
 
-pub contract NoDelegateCallTest uses (ctx: Ctx, evm: mut Evm) {
+pub contract NoDelegateCallTest uses (ctx: Ctx) {
     original: Address,
 
     init() uses (ctx, mut original) { original = ctx.address() }
@@ -46,20 +41,6 @@ pub contract NoDelegateCallTest uses (ctx: Ctx, evm: mut Evm) {
 
         CannotBeDelegateCalled -> u256 uses (ctx, original) {
             cannot_be_delegate_called(original)
-        }
-
-        GetGasCostOfCanBeDelegateCalled -> u256 uses (ctx, evm) {
-            let gas_before = evm.gas()
-            can_be_delegate_called()
-            gas_before - evm.gas()
-        }
-
-        GetGasCostOfCannotBeDelegateCalled -> u256
-        uses (ctx, evm, original)
-        {
-            let gas_before = evm.gas()
-            cannot_be_delegate_called(original)
-            gas_before - evm.gas()
         }
 
         CallsIntoNoDelegateCallFunction uses (ctx, original) {

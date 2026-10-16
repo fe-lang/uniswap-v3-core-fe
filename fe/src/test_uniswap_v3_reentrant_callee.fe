@@ -1,7 +1,8 @@
-use core::ptr::{self, MemBuffer, MemSpan}
-use super::libraries::mem::{at, span}
+use core::abi::ByteInput
+use std::evm::packed::encode_packed
+use core::ptr::{MemBuffer, MemSpan}
 use std::abi::sol::{self, Uint160}
-use std::evm::{Address, Call, Ctx, Evm, RawMem}
+use std::evm::{Address, Call, Ctx, Evm}
 use super::libraries::tick_math::max_sqrt_ratio
 
 const ERROR_SELECTOR: u256 = 0x08c379a0
@@ -36,16 +37,16 @@ msg TestUniswapV3ReentrantCalleeMsg {
 }
 
 fn raw_call_expect_lok(pool: Address, args: MemSpan) uses (evm: mut Evm) {
-    let mut ret = MemBuffer::with_capacity(100)
+    var ret = MemBuffer::with_capacity(100)
     let outcome = evm.raw_call(addr: pool, gas: 1000000, value: 0, args, ret: mut ret)
     assert(!outcome.success())
     assert(outcome.returndata_len() == 100)
 
-    let ptr = ret.ptr()
-    assert(evm.mload(ptr) >> 224 == ERROR_SELECTOR)
-    assert(evm.mload(at(ptr, 4)) == 32)
-    assert(evm.mload(at(ptr, 36)) == 3)
-    assert(evm.mload(at(ptr, 68)) == ERROR_LOK_WORD)
+    let data = ret.span()
+    assert(data.word_at(0) >> 224 == ERROR_SELECTOR)
+    assert(data.word_at(4) == 32)
+    assert(data.word_at(36) == 3)
+    assert(data.word_at(68) == ERROR_LOK_WORD)
 }
 
 pub contract TestUniswapV3ReentrantCallee uses (ctx: Ctx, evm: mut Evm) {
@@ -97,60 +98,49 @@ pub contract TestUniswapV3ReentrantCallee uses (ctx: Ctx, evm: mut Evm) {
 }
 
 fn check_locked_entrypoints(pool: Address) uses (evm: mut Evm) {
-    let swap_ptr = ptr::alloc_bytes(196)
-    evm.mstore(addr: swap_ptr, value: (0x128acb08 as u256) << 224)
-    evm.mstore(addr: at(swap_ptr, 4), value: 0)
-    evm.mstore(addr: at(swap_ptr, 36), value: 0)
-    evm.mstore(addr: at(swap_ptr, 68), value: 1)
-    evm.mstore(addr: at(swap_ptr, 100), value: 0)
-    evm.mstore(addr: at(swap_ptr, 132), value: 160)
-    evm.mstore(addr: at(swap_ptr, 164), value: 0)
-    raw_call_expect_lok(pool, args: span(swap_ptr, 196))
-
-    let mint_ptr = ptr::alloc_bytes(196)
-    evm.mstore(addr: mint_ptr, value: (0x3c8a7d8d as u256) << 224)
-    evm.mstore(addr: at(mint_ptr, 4), value: 0)
-    evm.mstore(addr: at(mint_ptr, 36), value: 0)
-    evm.mstore(addr: at(mint_ptr, 68), value: 0)
-    evm.mstore(addr: at(mint_ptr, 100), value: 0)
-    evm.mstore(addr: at(mint_ptr, 132), value: 160)
-    evm.mstore(addr: at(mint_ptr, 164), value: 0)
-    raw_call_expect_lok(pool, args: span(mint_ptr, 196))
-
-    let collect_ptr = ptr::alloc_bytes(164)
-    evm.mstore(addr: collect_ptr, value: (0x4f1eb3d8 as u256) << 224)
-    evm.mstore(addr: at(collect_ptr, 4), value: 0)
-    evm.mstore(addr: at(collect_ptr, 36), value: 0)
-    evm.mstore(addr: at(collect_ptr, 68), value: 0)
-    evm.mstore(addr: at(collect_ptr, 100), value: 0)
-    evm.mstore(addr: at(collect_ptr, 132), value: 0)
-    raw_call_expect_lok(pool, args: span(collect_ptr, 164))
-
-    let burn_ptr = ptr::alloc_bytes(100)
-    evm.mstore(addr: burn_ptr, value: (0xa34123a7 as u256) << 224)
-    evm.mstore(addr: at(burn_ptr, 4), value: 0)
-    evm.mstore(addr: at(burn_ptr, 36), value: 0)
-    evm.mstore(addr: at(burn_ptr, 68), value: 0)
-    raw_call_expect_lok(pool, args: span(burn_ptr, 100))
-
-    let flash_ptr = ptr::alloc_bytes(164)
-    evm.mstore(addr: flash_ptr, value: (0x490e6cbc as u256) << 224)
-    evm.mstore(addr: at(flash_ptr, 4), value: 0)
-    evm.mstore(addr: at(flash_ptr, 36), value: 0)
-    evm.mstore(addr: at(flash_ptr, 68), value: 0)
-    evm.mstore(addr: at(flash_ptr, 100), value: 128)
-    evm.mstore(addr: at(flash_ptr, 132), value: 0)
-    raw_call_expect_lok(pool, args: span(flash_ptr, 164))
-
-    let collect_protocol_ptr = ptr::alloc_bytes(100)
-    evm.mstore(
-        addr: collect_protocol_ptr,
-        value: (0x85b66729 as u256) << 224,
+    let swap_ptr = encode_packed(
+        (
+            0x128acb08 as u32,
+            (0) as u256,
+            (0) as u256,
+            (1) as u256,
+            (0) as u256,
+            (160) as u256,
+            (0) as u256,
+        ),
     )
-    evm.mstore(addr: at(collect_protocol_ptr, 4), value: 0)
-    evm.mstore(addr: at(collect_protocol_ptr, 36), value: 0)
-    evm.mstore(addr: at(collect_protocol_ptr, 68), value: 0)
-    raw_call_expect_lok(pool, args: span(collect_protocol_ptr, 100))
+    raw_call_expect_lok(pool, args: swap_ptr.span().head(196))
+
+    let mint_ptr = encode_packed(
+        (
+            0x3c8a7d8d as u32,
+            (0) as u256,
+            (0) as u256,
+            (0) as u256,
+            (0) as u256,
+            (160) as u256,
+            (0) as u256,
+        ),
+    )
+    raw_call_expect_lok(pool, args: mint_ptr.span().head(196))
+
+    let collect_ptr = encode_packed(
+        (0x4f1eb3d8 as u32, (0) as u256, (0) as u256, (0) as u256, (0) as u256, (0) as u256),
+    )
+    raw_call_expect_lok(pool, args: collect_ptr.span().head(164))
+
+    let burn_ptr = encode_packed((0xa34123a7 as u32, (0) as u256, (0) as u256, (0) as u256))
+    raw_call_expect_lok(pool, args: burn_ptr.span().head(100))
+
+    let flash_ptr = encode_packed(
+        (0x490e6cbc as u32, (0) as u256, (0) as u256, (0) as u256, (128) as u256, (0) as u256),
+    )
+    raw_call_expect_lok(pool, args: flash_ptr.span().head(164))
+
+    let collect_protocol_ptr = encode_packed(
+        (0x85b66729 as u32, (0) as u256, (0) as u256, (0) as u256),
+    )
+    raw_call_expect_lok(pool, args: collect_protocol_ptr.span().head(100))
 
     assert!(false, "Unable to reenter")
 }

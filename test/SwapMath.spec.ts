@@ -6,7 +6,7 @@ import { expect } from './shared/expect'
 import snapshotGasCost from './shared/snapshotGasCost'
 import { encodePriceSqrt, expandTo18Decimals } from './shared/utilities'
 import { SqrtPriceMathTest } from '../typechain/SqrtPriceMathTest'
-import { getContractFactory } from './shared/feArtifacts'
+import { getContractFactory, itWithBlackBox } from './shared/feArtifacts'
 
 describe('SwapMath', () => {
   let swapMath: SwapMathTest
@@ -232,7 +232,7 @@ describe('SwapMath', () => {
     })
 
     describe('gas', () => {
-      it('swap one for zero exact in capped', async () => {
+      itWithBlackBox('swap one for zero exact in capped', async () => {
         await snapshotGasCost(
           swapMath.getGasCostOfComputeSwapStep(
             encodePriceSqrt(1, 1),
@@ -243,7 +243,7 @@ describe('SwapMath', () => {
           )
         )
       })
-      it('swap zero for one exact in capped', async () => {
+      itWithBlackBox('swap zero for one exact in capped', async () => {
         await snapshotGasCost(
           swapMath.getGasCostOfComputeSwapStep(
             encodePriceSqrt(1, 1),
@@ -254,7 +254,7 @@ describe('SwapMath', () => {
           )
         )
       })
-      it('swap one for zero exact out capped', async () => {
+      itWithBlackBox('swap one for zero exact out capped', async () => {
         await snapshotGasCost(
           swapMath.getGasCostOfComputeSwapStep(
             encodePriceSqrt(1, 1),
@@ -265,7 +265,7 @@ describe('SwapMath', () => {
           )
         )
       })
-      it('swap zero for one exact out capped', async () => {
+      itWithBlackBox('swap zero for one exact out capped', async () => {
         await snapshotGasCost(
           swapMath.getGasCostOfComputeSwapStep(
             encodePriceSqrt(1, 1),
@@ -276,7 +276,7 @@ describe('SwapMath', () => {
           )
         )
       })
-      it('swap one for zero exact in partial', async () => {
+      itWithBlackBox('swap one for zero exact in partial', async () => {
         await snapshotGasCost(
           swapMath.getGasCostOfComputeSwapStep(
             encodePriceSqrt(1, 1),
@@ -287,7 +287,7 @@ describe('SwapMath', () => {
           )
         )
       })
-      it('swap zero for one exact in partial', async () => {
+      itWithBlackBox('swap zero for one exact in partial', async () => {
         await snapshotGasCost(
           swapMath.getGasCostOfComputeSwapStep(
             encodePriceSqrt(1, 1),
@@ -298,7 +298,7 @@ describe('SwapMath', () => {
           )
         )
       })
-      it('swap one for zero exact out partial', async () => {
+      itWithBlackBox('swap one for zero exact out partial', async () => {
         await snapshotGasCost(
           swapMath.getGasCostOfComputeSwapStep(
             encodePriceSqrt(1, 1),
@@ -309,7 +309,7 @@ describe('SwapMath', () => {
           )
         )
       })
-      it('swap zero for one exact out partial', async () => {
+      itWithBlackBox('swap zero for one exact out partial', async () => {
         await snapshotGasCost(
           swapMath.getGasCostOfComputeSwapStep(
             encodePriceSqrt(1, 1),

@@ -1,7 +1,6 @@
-use core::ptr
-use super::libraries::mem::{at, span}
+use std::evm::encode_abi_payload
 use std::abi::sol::{self, Uint160}
-use std::evm::{Address, Ctx, Evm, RawMem}
+use std::evm::{Address, Ctx, Evm}
 
 const MASK_U160: u256 = 0xffffffffffffffffffffffffffffffffffffffff
 
@@ -48,10 +47,9 @@ fn as_address(_ value: u256) -> Address {
 }
 
 fn address_payload(_ sender: Address) -> Bytes uses (evm: mut Evm) {
-    let ptr = ptr::alloc_bytes(64)
-    evm.mstore(addr: ptr, value: 32)
-    evm.mstore(addr: at(ptr, 32), value: sender.inner)
-    Bytes::from_abi_tail(data: ptr, len: 32, size: 64)
+    // SAFETY: Raw word accesses and views below stay within this 64-byte allocation.
+    let payload = encode_abi_payload((sender.inner,))
+    Bytes::from_payload(source: payload.span())
 }
 
 fn decode_sender(_ data: Bytes) -> Address uses (evm: Evm) {

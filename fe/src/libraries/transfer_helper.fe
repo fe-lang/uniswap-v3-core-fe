@@ -1,28 +1,26 @@
-use core::ptr::{self, MemBuffer}
-use super::mem::{at, span}
-use std::evm::{Address, Call, Evm, RawMem}
+use core::abi::ByteInput
+use core::ptr::MemBuffer
+use std::evm::{Address, Call, Evm}
 
-const TRANSFER_SELECTOR: u256 = 0xa9059cbb
+msg TokenMsg {
+    #[selector = 0xa9059cbb]
+    Transfer { to: Address, value: u256 },
+}
 
 pub fn safe_transfer(token: Address, to: Address, value: u256) uses (evm: mut Evm) {
-    let ptr = ptr::alloc_bytes(68)
-    evm.mstore(addr: ptr, value: TRANSFER_SELECTOR << 224)
-    evm.mstore(addr: at(ptr, 4), value: to.inner)
-    evm.mstore(addr: at(ptr, 36), value: value)
-
-    let mut ret = MemBuffer::with_capacity(32)
+    var ret = MemBuffer::with_capacity(32)
     let outcome = evm
-        .raw_call(
+        .try_call_into(
             addr: token,
             gas: evm.gas(),
             value: 0,
-            args: span(ptr, 68),
+            message: TokenMsg::Transfer { to, value },
             ret: mut ret,
         )
     let ret_len = outcome.returndata_len()
-    let mut returned_true = false
+    var returned_true = false
     if ret_len >= 32 {
-        returned_true = evm.mload(ret.ptr()) != 0
+        returned_true = ret.span().word_at(0) != 0
     }
 
     assert!(outcome.success() && (ret_len == 0 || returned_true), "TF")

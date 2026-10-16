@@ -6,8 +6,8 @@ const U256_MAX: u256 = 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffff
 #[arithmetic(unchecked)]
 pub fn mul_div(_ a: u256, _ b: u256, denominator: u256) -> u256 {
     let mm = mulmod(a, b, U256_MAX)
-    let mut prod0 = a * b
-    let mut prod1 = (mm - prod0) - ((mm < prod0) as u256)
+    var prod0 = a * b
+    var prod1 = (mm - prod0) - ((mm < prod0) as u256)
 
     if prod1 == 0 {
         assert(denominator > 0)
@@ -27,7 +27,7 @@ pub fn mul_div(_ a: u256, _ b: u256, denominator: u256) -> u256 {
 
     prod0 = prod0 | (prod1 * flipped_twos)
 
-    let mut inv = (3 * exact_denominator) ^ 2
+    var inv = (3 * exact_denominator) ^ 2
     inv = inv * (2 - (exact_denominator * inv))
     inv = inv * (2 - (exact_denominator * inv))
     inv = inv * (2 - (exact_denominator * inv))
@@ -40,7 +40,7 @@ pub fn mul_div(_ a: u256, _ b: u256, denominator: u256) -> u256 {
 
 #[arithmetic(unchecked)]
 pub fn mul_div_rounding_up(_ a: u256, _ b: u256, denominator: u256) -> u256 {
-    let mut result = mul_div(a, b, denominator)
+    var result = mul_div(a, b, denominator)
     if mulmod(a, b, denominator) > 0 {
         assert(result < U256_MAX)
         result = result + 1

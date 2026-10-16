@@ -1,7 +1,10 @@
-use core::ptr::{self, MemBuffer}
-use super::libraries::mem::{at, span}
+use std::evm::StorageMap
+use core::abi::ByteInput
+use std::evm::packed::encode_packed
+use std::evm::encode_abi_payload
+use core::ptr::MemBuffer
 use std::evm::ops::signextend
-use std::evm::{Address, Call, Ctx, Evm, Log, RawMem, RawOps, bubble_last_revert}
+use std::evm::{Address, Call, Ctx, Evm, Log, RawOps, bubble_last_revert}
 use super::libraries::fixed_point_128::Q128
 use super::libraries::fixed_point_96::Q96
 use super::libraries::full_math::{mul_div, mul_div_rounding_up}
@@ -14,6 +17,7 @@ use super::libraries::pool_config::{
 }
 use super::libraries::pool_slot0::PackedSlot0
 use super::libraries::position
+use super::libraries::oracle
 use super::libraries::safe_cast::to_int128
 use super::libraries::sqrt_price_math::{get_amount0_delta, get_amount1_delta}
 use super::libraries::tick
@@ -31,9 +35,6 @@ use super::libraries::tick_math::{
 }
 
 const TEST_POOL_START_TIME: u256 = 1601906400
-const TICKS_SLOT: u256 = 5
-const TICK_BITMAP_SLOT: u256 = 6
-const POSITIONS_SLOT: u256 = 7
 const MAX_U128_WORD: u256 = 0xffffffffffffffffffffffffffffffff
 const MAX_U160_WORD: u256 = 0xffffffffffffffffffffffffffffffffffffffff
 const MAX_I256_WORD: u256 = 0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
@@ -47,9 +48,6 @@ const COLLECT_PROTOCOL_TOPIC: u256 = 0x596b573906218d3411850b26a6b437d6c4522fdb4
 const SET_FEE_PROTOCOL_TOPIC: u256 = 0x973d8d92bb299f4af6ce49b52a8adb85ae46b9f214c4c4fc06ac77401237b133
 const FLASH_TOPIC: u256 = 0xbdbdb71d7860376ba52b25a5028beea23581364a40522f6bcfb86bb1f2dca633
 const SWAP_TOPIC: u256 = 0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67
-const FLASH_CALLBACK_SELECTOR: u256 = 0xe9cbafb0
-const SWAP_CALLBACK_SELECTOR: u256 = 0xfa461e33
-const ERROR_STRING_SELECTOR_WORD: u256 = 0x08c379a000000000000000000000000000000000000000000000000000000000
 const MSG_TLU: u256 = 0x544c550000000000000000000000000000000000000000000000000000000000
 const MSG_TLM: u256 = 0x544c4d0000000000000000000000000000000000000000000000000000000000
 const MSG_TUM: u256 = 0x54554d0000000000000000000000000000000000000000000000000000000000
@@ -138,6 +136,9 @@ msg MockTimeUniswapV3PoolMsg {
     #[selector = 0xf30dba93]
     Ticks,
 
+    #[selector = 0x5339c296]
+    TickBitmap { word_position: i16 } -> u256,
+
     #[selector = 0x514ea4bf]
     Positions,
 
@@ -153,15 +154,17 @@ msg MockTimeUniswapV3PoolMsg {
 
 struct MockTimePoolStore {
     slot0: PackedSlot0,
-    observation0_block_timestamp: u32,
-    observation0_tick_cumulative: i64,
-    observation0_seconds_per_liquidity_cumulative_x128: u256,
-    time: u256,
-    liquidity: u128,
     fee_growth_global0_x128: u256,
     fee_growth_global1_x128: u256,
     protocol_fee0: u128,
     protocol_fee1: u128,
+    liquidity: u128,
+    // Solidity mapping roots are reserved by their owners, at slots 5..7.
+    ticks: tick::Ticks,
+    bitmap: super::libraries::tick_bitmap::Bitmap,
+    positions: StorageMap<u256, position::Info>,
+    observations: oracle::Observations,
+    time: u256,
 }
 
 #[arithmetic(unchecked)]
@@ -177,12 +180,10 @@ fn decode_int24_word(_ word: u256) -> i256 {
 #[arithmetic(unchecked)]
 fn require_msg(_ evm: mut Evm, condition: bool, code: u256, len: u256) {
     if !condition {
-        let out = ptr::alloc_bytes(100)
-        evm.mstore(addr: out, value: ERROR_STRING_SELECTOR_WORD)
-        evm.mstore(addr: at(out, 4), value: 32)
-        evm.mstore(addr: at(out, 36), value: len)
-        evm.mstore(addr: at(out, 68), value: code)
-        evm.revert(data: span(out, 100))
+        let out = encode_packed(
+            (0x08c379a0 as u32, (32) as u256, (len) as u256, (code) as u256),
+        )
+        evm.revert(data: out.span().head(100))
     }
 }
 
@@ -216,41 +217,6 @@ fn check_unlocked(_ evm: mut Evm, _ unlocked: bool) {
 #[arithmetic(unchecked)]
 fn tick_at_sqrt_ratio(sqrt_price_x96: u256) -> i32 {
     get_tick_at_sqrt_ratio(sqrt_price_x96).downcast_unchecked()
-}
-
-#[arithmetic(unchecked)]
-fn current_tick_cumulative(tick_cumulative: i64, tick_current: i32, time_delta: u32) -> i256 {
-    (tick_cumulative as i256) + ((tick_current as i256) * (time_delta as i256))
-}
-
-#[arithmetic(unchecked)]
-fn current_seconds_per_liquidity(
-    seconds_per_liquidity_cumulative_x128: u256,
-    time_delta: u32,
-    liquidity: u128,
-) -> u256 {
-    let denominator = if liquidity > 0 { liquidity as u256 } else { 1 }
-    seconds_per_liquidity_cumulative_x128 + (((time_delta as u256) << 128) / denominator)
-}
-
-#[arithmetic(unchecked)]
-fn current_observation(
-    current_time: u32,
-    block_timestamp: u32,
-    tick_cumulative: i64,
-    tick_current: i32,
-    seconds_per_liquidity_cumulative_x128: u256,
-    liquidity: u128,
-) -> (i256, u256) {
-    let time_delta = current_time - block_timestamp
-    (
-        current_tick_cumulative(tick_cumulative, tick_current, time_delta),
-        current_seconds_per_liquidity(
-            seconds_per_liquidity_cumulative_x128,
-            time_delta,
-            liquidity,
-        ),
-    )
 }
 
 #[arithmetic(unchecked)]
@@ -337,58 +303,55 @@ fn next_sqrt_price_amount1_sub(sqrt_p_x96: u256, _ liquidity: u128, amount: u256
 fn balance_of(token: Address, account: Address) -> u256
 uses (call: mut Call, evm: mut Evm)
 {
-    let args = ptr::alloc_bytes(36)
-    evm.mstore(addr: args, value: (0x70a08231 as u256) << 224)
-    evm.mstore(addr: at(args, 4), value: account.inner)
-    let mut ret = MemBuffer::with_capacity(32)
-    let outcome = call.raw_staticcall(
+    let args = encode_packed((0x70a08231 as u32, (account.inner) as u256))
+    var ret = MemBuffer::with_capacity(32)
+    let outcome = call
+        .raw_staticcall(
             addr: token,
             gas: 1000000,
-            args: span(args, 36),
+            args: args.span().head(36),
             ret: mut ret,
         )
     assert(outcome.success() && outcome.returndata_len() >= 32)
-    evm.mload(ret.ptr())
+    ret.span().word_at(0)
 }
 
 #[arithmetic(unchecked)]
 fn factory_owner(factory: Address) -> u256 uses (call: mut Call, evm: mut Evm) {
-    let args = ptr::alloc_bytes(32)
-    evm.mstore(addr: args, value: (0x8da5cb5b as u256) << 224)
-    let mut ret = MemBuffer::with_capacity(32)
+    let args = encode_abi_payload(((0x8da5cb5b as u256) << 224,))
+    var ret = MemBuffer::with_capacity(32)
     let outcome = call
         .raw_staticcall(
             addr: factory,
             gas: evm.gas(),
-            args: span(args, 4),
+            args: args.span().head(4),
             ret: mut ret,
         )
     assert(outcome.success() && outcome.returndata_len() >= 32)
-    evm.mload(ret.ptr())
+    ret.span().word_at(0)
 }
 
 #[arithmetic(unchecked)]
 fn load_deployer_parameters(deployer: Address) -> (Address, Address, Address, u32, i32)
 uses (call: mut Call, evm: mut Evm)
 {
-    let args = ptr::alloc_bytes(32)
-    evm.mstore(addr: args, value: (0x89035730 as u256) << 224)
-    let mut ret = MemBuffer::with_capacity(160)
+    let args = encode_abi_payload(((0x89035730 as u256) << 224,))
+    var ret = MemBuffer::with_capacity(160)
     let outcome = call
         .raw_staticcall(
             addr: deployer,
             gas: evm.gas(),
-            args: span(args, 4),
+            args: args.span().head(4),
             ret: mut ret,
         )
     assert(outcome.success() && outcome.returndata_len() >= 160)
-    let ptr = ret.ptr()
+    let data = ret.span()
     (
-        Address { inner: evm.mload(ptr) },
-        Address { inner: evm.mload(at(ptr, 32)) },
-        Address { inner: evm.mload(at(ptr, 64)) },
-        evm.mload(at(ptr, 96)).downcast_unchecked(),
-        decode_int24_word(evm.mload(at(ptr, 128))).downcast_unchecked(),
+        Address { inner: data.word_at(0) },
+        Address { inner: data.word_at(32) },
+        Address { inner: data.word_at(64) },
+        data.word_at(96).downcast_unchecked(),
+        decode_int24_word(data.word_at(128)).downcast_unchecked(),
     )
 }
 
@@ -411,25 +374,24 @@ uses (evm: mut Evm, store: mut MockTimePoolStore)
     let tick_spacing = config_tick_spacing(pool_config) as i256
     let max_liquidity = config_max_liquidity(pool_config)
 
-    let mut current_time: u32 = 0
-    let mut tick_cumulative: i256 = 0
-    let mut seconds_per_liquidity_cumulative_x128: u256 = 0
-    let mut flipped_lower = false
-    let mut flipped_upper = false
+    var current_time: u32 = 0
+    var tick_cumulative: i256 = 0
+    var seconds_per_liquidity_cumulative_x128: u256 = 0
+    var flipped_lower = false
+    var flipped_upper = false
     if liquidity_delta != 0 {
         current_time = store.time.downcast_unchecked()
-        let time_delta = current_time - store.observation0_block_timestamp
-        tick_cumulative = current_tick_cumulative(
-            tick_cumulative: store.observation0_tick_cumulative,
-            tick_current: slot0.tick(),
-            time_delta,
-        )
-        seconds_per_liquidity_cumulative_x128 = current_seconds_per_liquidity(
-            seconds_per_liquidity_cumulative_x128: store
-                .observation0_seconds_per_liquidity_cumulative_x128,
-            time_delta,
+        let observation = oracle::observe_single(
+            time: current_time,
+            seconds_ago: 0,
+            tick: tick_current_i,
+            index: slot0.observation_index(),
             liquidity: store.liquidity,
+            cardinality: slot0.observation_cardinality(),
+            observations: ref store.observations,
         )
+        tick_cumulative = observation.0
+        seconds_per_liquidity_cumulative_x128 = observation.1
         flipped_lower = tick::update_at(
             tick: tick_lower,
             tick_current: tick_current_i,
@@ -441,7 +403,7 @@ uses (evm: mut Evm, store: mut MockTimePoolStore)
             time: current_time,
             upper: false,
             max_liquidity,
-            ticks_slot: TICKS_SLOT,
+            ticks: mut store.ticks,
         )
         flipped_upper = tick::update_at(
             tick: tick_upper,
@@ -454,22 +416,14 @@ uses (evm: mut Evm, store: mut MockTimePoolStore)
             time: current_time,
             upper: true,
             max_liquidity,
-            ticks_slot: TICKS_SLOT,
+            ticks: mut store.ticks,
         )
 
         if flipped_lower {
-            flip_tick_at(
-                tick: tick_lower,
-                tick_spacing,
-                bitmap_slot: TICK_BITMAP_SLOT,
-            )
+            flip_tick_at(tick: tick_lower, tick_spacing, bitmap: mut store.bitmap)
         }
         if flipped_upper {
-            flip_tick_at(
-                tick: tick_upper,
-                tick_spacing,
-                bitmap_slot: TICK_BITMAP_SLOT,
-            )
+            flip_tick_at(tick: tick_upper, tick_spacing, bitmap: mut store.bitmap)
         }
     }
 
@@ -479,17 +433,12 @@ uses (evm: mut Evm, store: mut MockTimePoolStore)
         tick_current: tick_current_i,
         fee_growth_global0_x128: store.fee_growth_global0_x128,
         fee_growth_global1_x128: store.fee_growth_global1_x128,
-        ticks_slot: TICKS_SLOT,
+        ticks: ref store.ticks,
     )
-    let position_slot = position::position_slot(
-        owner,
-        tick_lower,
-        tick_upper,
-        positions_slot: POSITIONS_SLOT,
-    )
+    let position_key = position::position_key(owner, tick_lower, tick_upper)
 
-    let mut amount0: u256 = 0
-    let mut amount1: u256 = 0
+    var amount0: u256 = 0
+    var amount1: u256 = 0
     let in_range = tick_current_i >= tick_lower && tick_current_i < tick_upper
     if liquidity_delta != 0 {
         let amount: u128 = if liquidity_delta < 0 {
@@ -547,7 +496,7 @@ uses (evm: mut Evm, store: mut MockTimePoolStore)
         0
     }
     position::update(
-        base_slot: position_slot,
+        mut store.positions[position_key],
         liquidity_delta,
         fee_growth_inside0_x128,
         fee_growth_inside1_x128,
@@ -557,18 +506,24 @@ uses (evm: mut Evm, store: mut MockTimePoolStore)
 
     if liquidity_delta < 0 {
         if flipped_lower {
-            tick::clear_at(tick: tick_lower, ticks_slot: TICKS_SLOT)
+            tick::clear_at(tick: tick_lower, ticks: mut store.ticks)
         }
         if flipped_upper {
-            tick::clear_at(tick: tick_upper, ticks_slot: TICKS_SLOT)
+            tick::clear_at(tick: tick_upper, ticks: mut store.ticks)
         }
     }
 
     if liquidity_delta != 0 && in_range {
-        store.observation0_block_timestamp = current_time
-        store.observation0_tick_cumulative = tick_cumulative.downcast_unchecked()
-        store
-            .observation0_seconds_per_liquidity_cumulative_x128 = seconds_per_liquidity_cumulative_x128
+        let (index, cardinality) = oracle::write(
+            index: slot0.observation_index(),
+            block_timestamp: current_time,
+            tick: tick_current_i,
+            liquidity: store.liquidity,
+            cardinality: slot0.observation_cardinality(),
+            cardinality_next: slot0.observation_cardinality_next(),
+            observations: mut store.observations,
+        )
+        store.slot0 = store.slot0.with_observation(index, cardinality)
         store.liquidity = add_delta(store.liquidity, liquidity_delta)
     }
 
@@ -590,9 +545,9 @@ fn call_swap_step(
     } else {
         sub_u256(a: 0, b: amount_remaining)
     }
-    let mut amount_in: u256 = 0
-    let mut amount_out: u256 = 0
-    let mut sqrt_ratio_next_x96: u256 = 0
+    var amount_in: u256 = 0
+    var amount_out: u256 = 0
+    var sqrt_ratio_next_x96: u256 = 0
     if exact_input {
         let amount_remaining_less_fee = mul_div(
             amount_remaining_abs,
@@ -707,57 +662,24 @@ fn call_swap_step(
     (sqrt_ratio_next_x96, amount_in, amount_out, fee_amount)
 }
 
-#[arithmetic(unchecked)]
-fn mint_callback_calldata(caller: Address, amount0: u256, amount1: u256, data_start: u256)
+#[arithmetic(checked)]
+fn call_callback(selector: u32, caller: Address, amount0: u256, amount1: u256, data_start: u256)
 uses (call: mut Call, evm: mut Evm)
 {
+    let calldata_size = evm.calldatasize()
+    assert(calldata_size >= 32 && data_start <= calldata_size - 32)
     let data_len = evm.calldataload(data_start)
+    assert(data_len <= calldata_size - data_start - 32)
     let data_size = 32 + (((data_len + 31) / 32) * 32)
-    let len = 100 + data_size
-    let mut buf = MemBuffer::alloc(len)
-    let ptr = buf.ptr()
-    evm.mstore(addr: ptr, value: (0xd3487997 as u256) << 224)
-    evm.mstore(addr: at(ptr, 4), value: amount0)
-    evm.mstore(addr: at(ptr, 36), value: amount1)
-    evm.mstore(addr: at(ptr, 68), value: 96)
+    var buf = encode_packed((selector, amount0, amount1, 96 as u256)).into_buffer()
+    buf.reserve(data_size)
     evm.calldatacopy(
         dest: mut buf,
         dest_offset: 100,
         src_offset: data_start,
         len: data_size,
     )
-    let mut ret = MemBuffer::empty()
-    let outcome = call
-        .raw_call(
-            addr: caller,
-            gas: evm.gas(),
-            value: 0,
-            args: buf.span(),
-            ret: mut ret,
-        )
-    if !outcome.success() {
-        bubble_last_revert()
-    }
-}
-
-#[arithmetic(unchecked)]
-fn flash_callback(caller: Address, fee0: u256, fee1: u256, data_start: u256)
-uses (call: mut Call, evm: mut Evm)
-{
-    let mut buf = MemBuffer::alloc(228)
-    let ptr = buf.ptr()
-    evm.mstore(addr: ptr, value: FLASH_CALLBACK_SELECTOR << 224)
-    evm.mstore(addr: at(ptr, 4), value: fee0)
-    evm.mstore(addr: at(ptr, 36), value: fee1)
-    evm.mstore(addr: at(ptr, 68), value: 96)
-    evm.mstore(addr: at(ptr, 100), value: 96)
-    evm.calldatacopy(
-        dest: mut buf,
-        dest_offset: 132,
-        src_offset: data_start + 32,
-        len: 96,
-    )
-    let mut ret = MemBuffer::empty()
+    var ret = MemBuffer::empty()
     let outcome = call
         .raw_call(
             addr: caller,
@@ -782,20 +704,18 @@ uses (call: mut Call, evm: mut Evm)
 {
     let data_len = evm.calldataload(data_start)
     let data_size = 32 + (((data_len + 31) / 32) * 32)
-    let len = 100 + data_size
-    let mut buf = MemBuffer::alloc(len)
-    let ptr = buf.ptr()
-    evm.mstore(addr: ptr, value: SWAP_CALLBACK_SELECTOR << 224)
-    evm.mstore(addr: at(ptr, 4), value: amount0_delta)
-    evm.mstore(addr: at(ptr, 36), value: amount1_delta)
-    evm.mstore(addr: at(ptr, 68), value: 96)
+    var buf = encode_packed(
+        (0xfa461e33 as u32, amount0_delta, amount1_delta, 96 as u256),
+    )
+        .into_buffer()
+    buf.reserve(data_size)
     evm.calldatacopy(
         dest: mut buf,
         dest_offset: 100,
         src_offset: data_start,
         len: data_size,
     )
-    let mut ret = MemBuffer::empty()
+    var ret = MemBuffer::empty()
     let outcome = call
         .raw_call(
             addr: caller,
@@ -811,21 +731,17 @@ uses (call: mut Call, evm: mut Evm)
 
 #[arithmetic(unchecked)]
 fn emit_initialize(sqrt_price_x96: u256, tick: i32) uses (evm: mut Evm) {
-    let out = ptr::alloc_bytes(64)
-    evm.mstore(addr: out, value: sqrt_price_x96)
-    evm.mstore(addr: at(out, 32), value: int24_abi_word(tick))
-    evm.log1(data: span(out, 64), topic0: INITIALIZE_TOPIC)
+    let out = encode_abi_payload((sqrt_price_x96, int24_abi_word(tick)))
+    evm.log1(data: out.span().head(64), topic0: INITIALIZE_TOPIC)
 }
 
 #[arithmetic(unchecked)]
 fn emit_increase_observation_cardinality_next(old: u16, new: u16)
 uses (evm: mut Evm)
 {
-    let out = ptr::alloc_bytes(64)
-    evm.mstore(addr: out, value: old as u256)
-    evm.mstore(addr: at(out, 32), value: new as u256)
+    let out = encode_abi_payload((old as u256, new as u256))
     evm.log1(
-        data: span(out, 64),
+        data: out.span().head(64),
         topic0: INCREASE_OBSERVATION_CARDINALITY_NEXT_TOPIC,
     )
 }
@@ -842,13 +758,9 @@ fn emit_mint(
 )
 uses (evm: mut Evm)
 {
-    let ptr = ptr::alloc_bytes(128)
-    evm.mstore(addr: ptr, value: sender.inner)
-    evm.mstore(addr: at(ptr, 32), value: amount as u256)
-    evm.mstore(addr: at(ptr, 64), value: amount0)
-    evm.mstore(addr: at(ptr, 96), value: amount1)
+    let ptr = encode_abi_payload((sender.inner, amount as u256, amount0, amount1))
     evm.log4(
-        data: span(ptr, 128),
+        data: ptr.span().head(128),
         topic0: MINT_TOPIC,
         topic1: owner.inner,
         topic2: int24_abi_word(tick_lower),
@@ -867,12 +779,9 @@ fn emit_burn(
 )
 uses (evm: mut Evm)
 {
-    let ptr = ptr::alloc_bytes(96)
-    evm.mstore(addr: ptr, value: amount as u256)
-    evm.mstore(addr: at(ptr, 32), value: amount0)
-    evm.mstore(addr: at(ptr, 64), value: amount1)
+    let ptr = encode_abi_payload((amount as u256, amount0, amount1))
     evm.log4(
-        data: span(ptr, 96),
+        data: ptr.span().head(96),
         topic0: BURN_TOPIC,
         topic1: owner.inner,
         topic2: int24_abi_word(tick_lower),
@@ -891,13 +800,9 @@ fn emit_flash(
 )
 uses (evm: mut Evm)
 {
-    let ptr = ptr::alloc_bytes(128)
-    evm.mstore(addr: ptr, value: amount0)
-    evm.mstore(addr: at(ptr, 32), value: amount1)
-    evm.mstore(addr: at(ptr, 64), value: paid0)
-    evm.mstore(addr: at(ptr, 96), value: paid1)
+    let ptr = encode_abi_payload((amount0, amount1, paid0, paid1))
     evm.log3(
-        data: span(ptr, 128),
+        data: ptr.span().head(128),
         topic0: FLASH_TOPIC,
         topic1: sender.inner,
         topic2: recipient.inner,
@@ -912,29 +817,26 @@ fn return_snapshot(
 ) -> !
 uses (evm: mut Evm)
 {
-    let out = ptr::alloc_bytes(96)
-    evm.mstore(addr: out, value: int_key(tick_cumulative_inside))
-    evm.mstore(
-        addr: at(out, 32),
-        value: seconds_per_liquidity_inside_x128,
+    let out = encode_abi_payload(
+        (
+            int_key(tick_cumulative_inside),
+            seconds_per_liquidity_inside_x128,
+            seconds_inside as u256,
+        ),
     )
-    evm.mstore(addr: at(out, 64), value: seconds_inside as u256)
-    evm.return_data(data: span(out, 96))
+    evm.return_data(data: out.span().head(96))
 }
 
 #[arithmetic(unchecked)]
 fn return_pair(amount0: u256, amount1: u256) -> ! uses (evm: mut Evm) {
-    let out = ptr::alloc_bytes(64)
-    evm.mstore(addr: out, value: amount0)
-    evm.mstore(addr: at(out, 32), value: amount1)
-    evm.return_data(data: span(out, 64))
+    let out = encode_abi_payload((amount0, amount1))
+    evm.return_data(data: out.span().head(64))
 }
 
 #[arithmetic(unchecked)]
 fn return_word(value: u256) -> ! uses (evm: mut Evm) {
-    let out = ptr::alloc_bytes(32)
-    evm.mstore(addr: out, value)
-    evm.return_data(data: span(out, 32))
+    let out = encode_abi_payload(value)
+    evm.return_data(data: out.span().head(32))
 }
 
 #[arithmetic(unchecked)]
@@ -949,18 +851,18 @@ fn return_slot0(
 ) -> !
 uses (evm: mut Evm)
 {
-    let out = ptr::alloc_bytes(224)
-    evm.mstore(addr: out, value: sqrt_price_x96)
-    evm.mstore(addr: at(out, 32), value: int_key(tick as i256))
-    evm.mstore(addr: at(out, 64), value: observation_index as u256)
-    evm.mstore(addr: at(out, 96), value: observation_cardinality as u256)
-    evm.mstore(
-        addr: at(out, 128),
-        value: observation_cardinality_next as u256,
+    let out = encode_abi_payload(
+        (
+            sqrt_price_x96,
+            int_key(tick as i256),
+            observation_index as u256,
+            observation_cardinality as u256,
+            observation_cardinality_next as u256,
+            fee_protocol as u256,
+            unlocked,
+        ),
     )
-    evm.mstore(addr: at(out, 160), value: fee_protocol as u256)
-    evm.mstore(addr: at(out, 192), value: if unlocked { 1 } else { 0 })
-    evm.return_data(data: span(out, 224))
+    evm.return_data(data: out.span().head(224))
 }
 
 #[arithmetic(unchecked)]
@@ -972,15 +874,15 @@ fn return_observation(
 ) -> !
 uses (evm: mut Evm)
 {
-    let out = ptr::alloc_bytes(128)
-    evm.mstore(addr: out, value: block_timestamp as u256)
-    evm.mstore(addr: at(out, 32), value: int_key(tick_cumulative as i256))
-    evm.mstore(
-        addr: at(out, 64),
-        value: seconds_per_liquidity_cumulative_x128,
+    let out = encode_abi_payload(
+        (
+            block_timestamp as u256,
+            int_key(tick_cumulative as i256),
+            seconds_per_liquidity_cumulative_x128,
+            initialized,
+        ),
     )
-    evm.mstore(addr: at(out, 96), value: if initialized { 1 } else { 0 })
-    evm.return_data(data: span(out, 128))
+    evm.return_data(data: out.span().head(128))
 }
 
 #[arithmetic(unchecked)]
@@ -996,22 +898,19 @@ fn return_tick_info(
 ) -> !
 uses (evm: mut Evm)
 {
-    let out = ptr::alloc_bytes(256)
-    evm.mstore(addr: out, value: liquidity_gross as u256)
-    evm.mstore(addr: at(out, 32), value: int_key(liquidity_net as i256))
-    evm.mstore(addr: at(out, 64), value: fee_growth_outside0_x128)
-    evm.mstore(addr: at(out, 96), value: fee_growth_outside1_x128)
-    evm.mstore(
-        addr: at(out, 128),
-        value: int_key(tick_cumulative_outside),
+    let out = encode_abi_payload(
+        (
+            liquidity_gross as u256,
+            int_key(liquidity_net as i256),
+            fee_growth_outside0_x128,
+            fee_growth_outside1_x128,
+            int_key(tick_cumulative_outside),
+            seconds_per_liquidity_outside_x128,
+            seconds_outside as u256,
+            initialized,
+        ),
     )
-    evm.mstore(
-        addr: at(out, 160),
-        value: seconds_per_liquidity_outside_x128,
-    )
-    evm.mstore(addr: at(out, 192), value: seconds_outside as u256)
-    evm.mstore(addr: at(out, 224), value: if initialized { 1 } else { 0 })
-    evm.return_data(data: span(out, 256))
+    evm.return_data(data: out.span().head(256))
 }
 
 #[arithmetic(unchecked)]
@@ -1024,13 +923,16 @@ fn return_position_info(
 ) -> !
 uses (evm: mut Evm)
 {
-    let out = ptr::alloc_bytes(160)
-    evm.mstore(addr: out, value: liquidity_value as u256)
-    evm.mstore(addr: at(out, 32), value: fee_growth_inside0_last_x128)
-    evm.mstore(addr: at(out, 64), value: fee_growth_inside1_last_x128)
-    evm.mstore(addr: at(out, 96), value: tokens_owed0 as u256)
-    evm.mstore(addr: at(out, 128), value: tokens_owed1 as u256)
-    evm.return_data(data: span(out, 160))
+    let out = encode_abi_payload(
+        (
+            liquidity_value as u256,
+            fee_growth_inside0_last_x128,
+            fee_growth_inside1_last_x128,
+            tokens_owed0 as u256,
+            tokens_owed1 as u256,
+        ),
+    )
+    evm.return_data(data: out.span().head(160))
 }
 
 pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm) {
@@ -1100,20 +1002,16 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
         }
 
         Observations uses (store, mut evm) {
-            if evm.calldataload(4) == 0 {
-                return_observation(
-                    block_timestamp: store.observation0_block_timestamp,
-                    tick_cumulative: store.observation0_tick_cumulative,
-                    seconds_per_liquidity_cumulative_x128: store
-                        .observation0_seconds_per_liquidity_cumulative_x128,
-                    initialized: true,
-                )
-            }
+            let observation = oracle::read_observation(
+                evm.calldataload(4),
+                observations: ref store.observations,
+            )
             return_observation(
-                block_timestamp: 0,
-                tick_cumulative: 0,
-                seconds_per_liquidity_cumulative_x128: 0,
-                initialized: false,
+                block_timestamp: observation.block_timestamp,
+                tick_cumulative: observation.tick_cumulative.downcast_unchecked(),
+                seconds_per_liquidity_cumulative_x128: observation
+                    .seconds_per_liquidity_cumulative_x128,
+                initialized: observation.initialized,
             )
         }
 
@@ -1128,9 +1026,10 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             )
             let tick = tick_at_sqrt_ratio(sqrt_price_x96)
             store.slot0 = PackedSlot0::initialized(sqrt_price_x96, tick)
-            store.observation0_block_timestamp = store.time.downcast_unchecked()
-            store.observation0_tick_cumulative = 0
-            store.observation0_seconds_per_liquidity_cumulative_x128 = 0
+            oracle::initialize_observations(
+                time: store.time.downcast_unchecked(),
+                observations: mut store.observations,
+            )
             emit_initialize(sqrt_price_x96, tick)
         }
 
@@ -1142,11 +1041,11 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             check_unlocked(mut evm, slot0.unlocked())
             store.slot0 = slot0.lock()
             let old = slot0.observation_cardinality_next()
-            let new = if observation_cardinality_next > old {
-                observation_cardinality_next
-            } else {
-                old
-            }
+            let new = oracle::grow(
+                current: old,
+                next: observation_cardinality_next,
+                observations: mut store.observations,
+            )
             store.slot0 = store.slot0.with_observation_cardinality_next(new)
             if old != new {
                 emit_increase_observation_cardinality_next(old, new)
@@ -1199,21 +1098,21 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 seconds_per_liquidity_outside_lower,
                 seconds_outside_lower,
                 initialized_lower,
-            ) = tick::read_observation_tick_at(lower, ticks_slot: TICKS_SLOT)
+            ) = tick::read_observation_tick_at(lower, ticks: ref store.ticks)
             assert(initialized_lower)
             let (
                 tick_cumulative_upper,
                 seconds_per_liquidity_outside_upper,
                 seconds_outside_upper,
                 initialized_upper,
-            ) = tick::read_observation_tick_at(upper, ticks_slot: TICKS_SLOT)
+            ) = tick::read_observation_tick_at(upper, ticks: ref store.ticks)
             assert(initialized_upper)
 
             let slot0 = store.slot0
             let tick_current = slot0.tick() as i256
-            let mut tick_cumulative_inside = 0
-            let mut seconds_per_liquidity_inside_x128 = 0
-            let mut seconds_inside: u32 = 0
+            var tick_cumulative_inside = 0
+            var seconds_per_liquidity_inside_x128 = 0
+            var seconds_inside: u32 = 0
             if tick_current < lower {
                 tick_cumulative_inside = sub_i256(
                     a: tick_cumulative_lower,
@@ -1226,17 +1125,17 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 seconds_inside = sub_u32(a: seconds_outside_lower, b: seconds_outside_upper)
             } else if tick_current < upper {
                 let current_time: u32 = store.time.downcast_unchecked()
-                let time_delta = current_time - store.observation0_block_timestamp
-                let tick_cumulative = current_tick_cumulative(
-                    tick_cumulative: store.observation0_tick_cumulative,
-                    tick_current: slot0.tick(),
-                    time_delta,
-                )
-                let seconds_per_liquidity_cumulative_x128 = current_seconds_per_liquidity(
-                    seconds_per_liquidity_cumulative_x128: store
-                        .observation0_seconds_per_liquidity_cumulative_x128,
-                    time_delta,
+                let (
+                    tick_cumulative,
+                    seconds_per_liquidity_cumulative_x128,
+                ) = oracle::observe_single(
+                    time: current_time,
+                    seconds_ago: 0,
+                    tick: tick_current,
+                    index: slot0.observation_index(),
                     liquidity: store.liquidity,
+                    cardinality: slot0.observation_cardinality(),
+                    observations: ref store.observations,
                 )
                 let seconds_per_liquidity_inside_minus_lower = sub_u256(
                     a: seconds_per_liquidity_cumulative_x128,
@@ -1296,12 +1195,18 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             let fee_protocol: u8 = ((feeProtocol0 as u256) | ((feeProtocol1 as u256) << 4))
                 .downcast_unchecked()
             store.slot0 = store.slot0.with_fee_protocol(fee_protocol)
-            let log_data = ptr::alloc_bytes(128)
-            evm.mstore(addr: log_data, value: (old & 0x0f) as u256)
-            evm.mstore(addr: at(log_data, 32), value: (old >> 4) as u256)
-            evm.mstore(addr: at(log_data, 64), value: feeProtocol0 as u256)
-            evm.mstore(addr: at(log_data, 96), value: feeProtocol1 as u256)
-            evm.log1(data: span(log_data, 128), topic0: SET_FEE_PROTOCOL_TOPIC)
+            let log_data = encode_abi_payload(
+                (
+                    (old & 0x0f) as u256,
+                    (old >> 4) as u256,
+                    feeProtocol0 as u256,
+                    feeProtocol1 as u256,
+                ),
+            )
+            evm.log1(
+                data: log_data.span().head(128),
+                topic0: SET_FEE_PROTOCOL_TOPIC,
+            )
             store.slot0 = store.slot0.unlock()
         }
 
@@ -1314,8 +1219,8 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             let recipient = Address { inner: evm.calldataload(4) }
             let amount0_requested = decode_u128_word(evm.calldataload(36))
             let amount1_requested = decode_u128_word(evm.calldataload(68))
-            let mut amount0 = min_u128(a: amount0_requested, b: store.protocol_fee0)
-            let mut amount1 = min_u128(a: amount1_requested, b: store.protocol_fee1)
+            var amount0 = min_u128(a: amount0_requested, b: store.protocol_fee0)
+            var amount1 = min_u128(a: amount1_requested, b: store.protocol_fee1)
 
             if amount0 > 0 {
                 if amount0 == store.protocol_fee0 {
@@ -1332,11 +1237,9 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 safe_transfer(token: token1, to: recipient, value: amount1 as u256)
             }
 
-            let out = ptr::alloc_bytes(64)
-            evm.mstore(addr: out, value: amount0 as u256)
-            evm.mstore(addr: at(out, 32), value: amount1 as u256)
+            let out = encode_abi_payload((amount0 as u256, amount1 as u256))
             evm.log3(
-                data: span(out, 64),
+                data: out.span().head(64),
                 topic0: COLLECT_PROTOCOL_TOPIC,
                 topic1: ctx.caller().inner,
                 topic2: recipient.inner,
@@ -1372,7 +1275,13 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             if amount1 > 0 {
                 safe_transfer(token: token1, to: recipient, value: amount1)
             }
-            flash_callback(caller: ctx.caller(), fee0, fee1, data_start)
+            call_callback(
+                selector: 0xe9cbafb0,
+                caller: ctx.caller(),
+                amount0: fee0,
+                amount1: fee1,
+                data_start,
+            )
             let balance0_after = balance_of(token: token0, account: ctx.address())
             let balance1_after = balance_of(token: token1, account: ctx.address())
             assert(balance0_before + fee0 <= balance0_after)
@@ -1443,7 +1352,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 code: MSG_SPL,
                 len: 3,
             )
-            let mut slot0_next = slot0_start.lock()
+            var slot0_next = slot0_start.lock()
             store.slot0 = slot0_next
             let input_token = if zero_for_one { token0 } else { token1 }
             let output_token = if zero_for_one { token1 } else { token0 }
@@ -1453,26 +1362,26 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             let pool_config = pool_config
             let fee_pips = config_fee(pool_config) as u256
             let tick_spacing = config_tick_spacing(pool_config) as i256
-            let mut tick_cumulative: i256 = 0
-            let mut seconds_per_liquidity_cumulative_x128: u256 = 0
-            let mut computed_latest_observation = false
+            var tick_cumulative: i256 = 0
+            var seconds_per_liquidity_cumulative_x128: u256 = 0
+            var computed_latest_observation = false
 
             let exact_input = amount_specified <= MAX_I256_WORD
-            let mut amount_remaining = amount_specified
-            let mut amount_owed = 0
-            let mut amount_out_total = 0
-            let mut sqrt_price_x96 = sqrt_price_start_x96
-            let mut tick_current = tick_start as i256
+            var amount_remaining = amount_specified
+            var amount_owed = 0
+            var amount_out_total = 0
+            var sqrt_price_x96 = sqrt_price_start_x96
+            var tick_current = tick_start as i256
             let liquidity_start = store.liquidity
-            let mut liquidity_current = liquidity_start
-            let mut protocol_fees = 0
+            var liquidity_current = liquidity_start
+            var protocol_fees = 0
             let fee_protocol_word = slot0_start.fee_protocol()
             let fee_protocol = if zero_for_one {
                 fee_protocol_word & 0x0f
             } else {
                 fee_protocol_word >> 4
             }
-            let mut fee_growth_global_x128 = if zero_for_one {
+            var fee_growth_global_x128 = if zero_for_one {
                 store.fee_growth_global0_x128
             } else {
                 store.fee_growth_global1_x128
@@ -1480,11 +1389,11 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
 
             while amount_remaining != 0 && sqrt_price_x96 != sqrt_price_limit_x96 {
                 let sqrt_price_step_start_x96 = sqrt_price_x96
-                let (mut tick_next, initialized) = next_initialized_tick_within_one_word_at(
+                let (var tick_next, initialized) = next_initialized_tick_within_one_word_at(
                     tick: tick_current,
                     tick_spacing,
                     lte: zero_for_one,
-                    bitmap_slot: TICK_BITMAP_SLOT,
+                    bitmap: ref store.bitmap,
                 )
                 if tick_next < MIN_TICK {
                     tick_next = MIN_TICK
@@ -1548,20 +1457,20 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 if sqrt_price_x96 == sqrt_price_next_tick_x96 {
                     if initialized {
                         if !computed_latest_observation {
-                            let observation = current_observation(
-                                current_time,
-                                block_timestamp: store.observation0_block_timestamp,
-                                tick_cumulative: store.observation0_tick_cumulative,
-                                tick_current: tick_start,
-                                seconds_per_liquidity_cumulative_x128: store
-                                    .observation0_seconds_per_liquidity_cumulative_x128,
+                            let observation = oracle::observe_single(
+                                time: current_time,
+                                seconds_ago: 0,
+                                tick: tick_start as i256,
+                                index: slot0_start.observation_index(),
                                 liquidity: liquidity_start,
+                                cardinality: slot0_start.observation_cardinality(),
+                                observations: ref store.observations,
                             )
                             tick_cumulative = observation.0
                             seconds_per_liquidity_cumulative_x128 = observation.1
                             computed_latest_observation = true
                         }
-                        let mut liquidity_net = tick::cross_at(
+                        var liquidity_net = tick::cross_at(
                             tick: tick_next,
                             fee_growth_global0_x128: if zero_for_one {
                                 fee_growth_global_x128
@@ -1576,7 +1485,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                             seconds_per_liquidity_cumulative_x128,
                             tick_cumulative,
                             time: current_time,
-                            ticks_slot: TICKS_SLOT,
+                            ticks: mut store.ticks,
                         )
                         if zero_for_one {
                             liquidity_net = to_int128(0 - (liquidity_net as i256))
@@ -1594,23 +1503,16 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             }
 
             if tick_current != tick_start as i256 {
-                if !computed_latest_observation {
-                    let observation = current_observation(
-                        current_time,
-                        block_timestamp: store.observation0_block_timestamp,
-                        tick_cumulative: store.observation0_tick_cumulative,
-                        tick_current: tick_start,
-                        seconds_per_liquidity_cumulative_x128: store
-                            .observation0_seconds_per_liquidity_cumulative_x128,
-                        liquidity: liquidity_start,
-                    )
-                    tick_cumulative = observation.0
-                    seconds_per_liquidity_cumulative_x128 = observation.1
-                }
-                store.observation0_block_timestamp = current_time
-                store.observation0_tick_cumulative = tick_cumulative.downcast_unchecked()
-                store
-                    .observation0_seconds_per_liquidity_cumulative_x128 = seconds_per_liquidity_cumulative_x128
+                let (index, cardinality) = oracle::write(
+                    index: slot0_start.observation_index(),
+                    block_timestamp: current_time,
+                    tick: tick_start as i256,
+                    liquidity: liquidity_start,
+                    cardinality: slot0_start.observation_cardinality(),
+                    cardinality_next: slot0_start.observation_cardinality_next(),
+                    observations: mut store.observations,
+                )
+                slot0_next = slot0_next.with_observation(index, cardinality)
                 slot0_next = slot0_next
                     .with_sqrt_price_x96(sqrt_price_x96)
                     .with_tick(tick_current.downcast_unchecked())
@@ -1665,14 +1567,17 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 code: MSG_IIA,
                 len: 3,
             )
-            let log_data = ptr::alloc_bytes(160)
-            evm.mstore(addr: log_data, value: amount0_delta)
-            evm.mstore(addr: at(log_data, 32), value: amount1_delta)
-            evm.mstore(addr: at(log_data, 64), value: sqrt_price_x96)
-            evm.mstore(addr: at(log_data, 96), value: liquidity_current as u256)
-            evm.mstore(addr: at(log_data, 128), value: int_key(tick_current))
+            let log_data = encode_abi_payload(
+                (
+                    amount0_delta,
+                    amount1_delta,
+                    sqrt_price_x96,
+                    liquidity_current as u256,
+                    int_key(tick_current),
+                ),
+            )
             evm.log3(
-                data: span(log_data, 160),
+                data: log_data.span().head(160),
                 topic0: SWAP_TOPIC,
                 topic1: ctx.caller().inner,
                 topic2: recipient.inner,
@@ -1691,30 +1596,20 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
         }
 
         Observe uses (mut evm, store) {
-            let current_time: u32 = store.time.downcast_unchecked()
-            let time_delta = current_time - store.observation0_block_timestamp
-            let tick_cumulative = (store.observation0_tick_cumulative as i256)
-                + ((store.slot0.tick() as i256) * (time_delta as i256))
-            let seconds_per_liquidity_cumulative_x128 = current_seconds_per_liquidity(
-                seconds_per_liquidity_cumulative_x128: store
-                    .observation0_seconds_per_liquidity_cumulative_x128,
-                time_delta,
+            let slot0 = store.slot0
+            let out = oracle::encode_observe(
+                return_gas: false,
+                time: store.time.downcast_unchecked(),
+                tick: slot0.tick() as i256,
+                index: slot0.observation_index(),
                 liquidity: store.liquidity,
+                cardinality: slot0.observation_cardinality(),
+                observations: ref store.observations,
             )
-            let out = ptr::alloc_bytes(192)
-            evm.mstore(addr: out, value: 64)
-            evm.mstore(addr: at(out, 32), value: 128)
-            evm.mstore(addr: at(out, 64), value: 1)
-            evm.mstore(addr: at(out, 96), value: int_key(tick_cumulative))
-            evm.mstore(addr: at(out, 128), value: 1)
-            evm.mstore(
-                addr: at(out, 160),
-                value: seconds_per_liquidity_cumulative_x128,
-            )
-            evm.return_data(data: span(out, 192))
+            evm.return_data(data: out.span())
         }
 
-        Ticks uses (mut evm) {
+        Ticks uses (mut evm, store) {
             let tick = decode_int24_word(evm.calldataload(4))
             let (
                 liquidity_gross,
@@ -1725,7 +1620,7 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 seconds_per_liquidity_outside_x128,
                 seconds_outside,
                 initialized,
-            ) = tick::read_tick_at(tick, ticks_slot: TICKS_SLOT)
+            ) = tick::read_tick_at(tick, ticks: ref store.ticks)
             return_tick_info(
                 liquidity_gross,
                 liquidity_net,
@@ -1738,16 +1633,18 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             )
         }
 
-        Positions uses (mut evm) {
+        TickBitmap { word_position } -> u256 uses (store) {
+            store.bitmap[word_position as i256]
+        }
+
+        Positions uses (mut evm, store) {
             let (
                 liquidity_value,
                 fee_growth_inside0_last_x128,
                 fee_growth_inside1_last_x128,
                 tokens_owed0,
                 tokens_owed1,
-            ) = position::read_position(
-                position::mapping_slot(key: evm.calldataload(4), positions_slot: POSITIONS_SLOT),
-            )
+            ) = position::read_position(ref store.positions[evm.calldataload(4)])
             return_position_info(
                 liquidity_value,
                 fee_growth_inside0_last_x128,
@@ -1788,7 +1685,13 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 0
             }
 
-            mint_callback_calldata(caller: ctx.caller(), amount0, amount1, data_start)
+            call_callback(
+                selector: 0xd3487997,
+                caller: ctx.caller(),
+                amount0,
+                amount1,
+                data_start,
+            )
 
             if amount0 > 0 {
                 let balance0_after: u256 = balance_of(token: token0, account: ctx.address())
@@ -1861,22 +1764,21 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
             let tick_upper = decode_int24_word(evm.calldataload(68))
             let amount0_requested = decode_u128_word(evm.calldataload(100))
             let amount1_requested = decode_u128_word(evm.calldataload(132))
-            let position_slot = position::position_slot(
-                owner: ctx.caller(),
-                tick_lower,
-                tick_upper,
-                positions_slot: POSITIONS_SLOT,
-            )
-            let (tokens_owed0, tokens_owed1) = position::read_tokens_owed(position_slot)
-            let amount0 = min_u128(a: amount0_requested, b: tokens_owed0)
-            let amount1 = min_u128(a: amount1_requested, b: tokens_owed1)
+            let position_key = position::position_key(owner: ctx.caller(), tick_lower, tick_upper)
+            let (amount0, amount1) = {
+                let info = mut store.positions[position_key]
+                let (tokens_owed0, tokens_owed1) = position::read_tokens_owed(ref info)
+                let amount0 = min_u128(a: amount0_requested, b: tokens_owed0)
+                let amount1 = min_u128(a: amount1_requested, b: tokens_owed1)
 
-            if amount0 > 0 || amount1 > 0 {
-                position::set_tokens_owed(
-                    base_slot: position_slot,
-                    token0: tokens_owed0 - amount0,
-                    token1: tokens_owed1 - amount1,
-                )
+                if amount0 > 0 || amount1 > 0 {
+                    position::set_tokens_owed(
+                        mut info,
+                        token0: tokens_owed0 - amount0,
+                        token1: tokens_owed1 - amount1,
+                    )
+                }
+                (amount0, amount1)
             }
             if amount0 > 0 {
                 safe_transfer(token: token0, to: recipient, value: amount0 as u256)
@@ -1885,12 +1787,9 @@ pub contract MockTimeUniswapV3Pool uses (ctx: Ctx, call: mut Call, evm: mut Evm)
                 safe_transfer(token: token1, to: recipient, value: amount1 as u256)
             }
             store.slot0 = store.slot0.unlock()
-            let log_data = ptr::alloc_bytes(96)
-            evm.mstore(addr: log_data, value: recipient.inner)
-            evm.mstore(addr: at(log_data, 32), value: amount0 as u256)
-            evm.mstore(addr: at(log_data, 64), value: amount1 as u256)
+            let log_data = encode_abi_payload((recipient.inner, amount0 as u256, amount1 as u256))
             evm.log4(
-                data: span(log_data, 96),
+                data: log_data.span().head(96),
                 topic0: COLLECT_TOPIC,
                 topic1: ctx.caller().inner,
                 topic2: int24_abi_word(tick_lower.downcast_unchecked()),

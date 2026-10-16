@@ -1,7 +1,7 @@
 import { expect } from './shared/expect'
 import { BitMathTest } from '../typechain/BitMathTest'
 import { ethers, waffle } from 'hardhat'
-import { getContractFactory } from './shared/feArtifacts'
+import { getContractFactory, itWithBlackBox } from './shared/feArtifacts'
 import snapshotGasCost from './shared/snapshotGasCost'
 
 const { BigNumber } = ethers
@@ -36,13 +36,13 @@ describe('BitMath', () => {
       expect(await bitMath.mostSignificantBit(BigNumber.from(2).pow(256).sub(1))).to.eq(255)
     })
 
-    it('gas cost of smaller number', async () => {
+    itWithBlackBox('gas cost of smaller number', async () => {
       await snapshotGasCost(bitMath.getGasCostOfMostSignificantBit(BigNumber.from(3568)))
     })
-    it('gas cost of max uint128', async () => {
+    itWithBlackBox('gas cost of max uint128', async () => {
       await snapshotGasCost(bitMath.getGasCostOfMostSignificantBit(BigNumber.from(2).pow(128).sub(1)))
     })
-    it('gas cost of max uint256', async () => {
+    itWithBlackBox('gas cost of max uint256', async () => {
       await snapshotGasCost(bitMath.getGasCostOfMostSignificantBit(BigNumber.from(2).pow(256).sub(1)))
     })
   })
@@ -67,13 +67,13 @@ describe('BitMath', () => {
       expect(await bitMath.leastSignificantBit(BigNumber.from(2).pow(256).sub(1))).to.eq(0)
     })
 
-    it('gas cost of smaller number', async () => {
+    itWithBlackBox('gas cost of smaller number', async () => {
       await snapshotGasCost(bitMath.getGasCostOfLeastSignificantBit(BigNumber.from(3568)))
     })
-    it('gas cost of max uint128', async () => {
+    itWithBlackBox('gas cost of max uint128', async () => {
       await snapshotGasCost(bitMath.getGasCostOfLeastSignificantBit(BigNumber.from(2).pow(128).sub(1)))
     })
-    it('gas cost of max uint256', async () => {
+    itWithBlackBox('gas cost of max uint256', async () => {
       await snapshotGasCost(bitMath.getGasCostOfLeastSignificantBit(BigNumber.from(2).pow(256).sub(1)))
     })
   })
