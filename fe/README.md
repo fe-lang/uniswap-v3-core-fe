@@ -1,20 +1,19 @@
 # Fe MVS port
 
-Build with Fe
-[`8b904587cfe81322ac5897695b24feb650eee7d6`](https://github.com/sbillig/fe/commit/8b904587cfe81322ac5897695b24feb650eee7d6),
-based on current master `33ee9be2820f2d296e6d9c7a9d3f6f081a5f1959`.
-It adds the ABI metadata fix in [Fe PR #1807](https://github.com/argotorg/fe/pull/1807),
-which keeps built-in errors implicit so ethers can load generated ABIs.
-That PR is a compiler prerequisite; the port does not filter ABI errors.
-Mutable value semantics and checked `MemBuffer.write_word` are already in
-master. Committed Cargo dependencies pin Sonatina
-`cdb34cbb9563333cde4d2c64b594a0807d23e80c`. Use the explicit compiler path;
-an installed Fe release may use a different API.
+Build with Fe master
+[`5cebf09af44eaaf5e81302eecff01d519bf48f7b`](https://github.com/argotorg/fe/commit/5cebf09af44eaaf5e81302eecff01d519bf48f7b),
+with the Sonatina revision its Cargo dependencies pin,
+`5a44318d34c0701eaedf9e3485d5241459820cbb`. No compiler patches are applied.
+Master contains the ABI metadata fix from
+[Fe #1807](https://github.com/argotorg/fe/pull/1807), which keeps built-in
+errors implicit so ethers can load generated ABIs, and `core::hint::black_box`
+from [Fe #1808](https://github.com/argotorg/fe/pull/1808). Use the explicit
+compiler path; an installed Fe release may use a different API.
 
 ```sh
-git clone https://github.com/sbillig/fe.git /tmp/fe-v3-master
-git -C /tmp/fe-v3-master checkout 8b904587cfe81322ac5897695b24feb650eee7d6
-(cd /tmp/fe-v3-master && cargo build --release --locked -p fe -j 2)
+git clone https://github.com/argotorg/fe.git /tmp/fe-v3-master
+git -C /tmp/fe-v3-master checkout 5cebf09af44eaaf5e81302eecff01d519bf48f7b
+(cd /tmp/fe-v3-master && cargo build --release --locked -p fe)
 
 # From this repository, using Yarn 1.22.22:
 yarn install --frozen-lockfile --ignore-scripts
@@ -26,21 +25,31 @@ yarn tsc --noEmit
 
 The bridge builds 31 Fe artifacts with size optimization (`FE_OPTIMIZE=s`).
 The Fe-backed Hardhat suite uses Osaka and enforces the contract size limit.
-The pinned compiler builds all 31 bridge artifacts. Runtime sizes are 16,548 bytes
-for UniswapV3Pool, 16,770 for the mock pool, 18,455 for the factory, and 2,976
-for OracleTest. All are below the 24,576-byte EIP-170 limit.
+Runtime sizes are 15,415 bytes for UniswapV3Pool, 15,471 for the mock pool,
+17,142 for the factory, and 2,733 for OracleTest, all below the 24,576-byte
+EIP-170 limit.
 
-The full Fe-backed suite passes: **986 passing, 95 pending, zero failing**.
-Of the pending cases, 75 require the unavailable Fe `black_box` builtin;
-20 were already pending. TypeScript checking passes with ethers 5.8 and its
-aligned dependencies.
+The full Fe-backed suite passes: **1,061 passing, 20 pending, zero failing**.
+The 20 pending cases are also pending in the Solidity suite. The 75 gas cost
+cases run again: their `getGasCostOf...` wrappers pass inputs and results
+through `black_box`, so the optimizer keeps the measured work. TypeScript
+checking passes with ethers 5.8 and its aligned dependencies.
 
-The compiler ABI fix keeps `Panic(uint256)` and `Error(string)` implicit;
-no ABI filtering or additional overrides are applied in the bridge. All 31
-bridge ABIs match the previous port, and the ABI fix leaves all 62 init/runtime
-bytecode artifacts unchanged. The default Solidity suite retains its documented
-baseline: 1,037 passing, 20 pending, 24 failing (23 gas snapshots differ by
-12 gas and one Echidna arithmetic invariant fails).
+The bridge applies no ABI filtering or additional error overrides. The default
+Solidity suite retains its documented baseline: 1,037 passing, 20 pending,
+24 failing (23 gas snapshots differ by 12 gas and one Echidna arithmetic
+invariant fails).
+
+## Master API changes
+
+The port follows these library changes since the October 16 checkpoint:
+
+- `Address.inner` is private. Words are read with `word()`; masked words become
+  addresses with `Address::from_word_truncate`, which matches Solidity's
+  cleaning of calldata addresses.
+- `timestamp()` returns a `Timestamp`, read with `as_seconds()`, and call and
+  create values are `Wei`.
+- Memory offsets and lengths are `usize`.
 
 ## Current MVS syntax
 
