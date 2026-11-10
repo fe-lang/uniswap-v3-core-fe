@@ -1,6 +1,6 @@
 use std::evm::encode_abi_payload
 use std::abi::sol::{self, Uint160}
-use std::evm::{Address, Ctx, Evm}
+use std::evm::{Address, Ctx, Evm, Wei}
 
 const MASK_U160: u256 = 0xffffffffffffffffffffffffffffffffffffffff
 
@@ -45,14 +45,14 @@ msg TestUniswapV3SwapPayMsg {
 }
 
 fn as_address(_ value: u256) -> Address {
-    Address { inner: value & MASK_U160 }
+    Address::from_word_truncate(value)
 }
 
 fn swap_payload(sender: Address, pay0: u256, pay1: u256) -> Bytes
 uses (evm: mut Evm)
 {
     // SAFETY: Raw word accesses and views below stay within this 128-byte allocation.
-    let payload = encode_abi_payload((sender.inner, pay0, pay1))
+    let payload = encode_abi_payload((sender.word(), pay0, pay1))
     Bytes::from_payload(source: payload.span())
 }
 
@@ -61,7 +61,7 @@ fn token0(_ pool: Address) -> Address uses (evm: mut Evm) {
         evm.call(
             addr: pool,
             gas: 1000000,
-            value: 0,
+            value: Wei::zero(),
             message: PoolMsg::Token0 {},
         ),
     )
@@ -72,7 +72,7 @@ fn token1(_ pool: Address) -> Address uses (evm: mut Evm) {
         evm.call(
             addr: pool,
             gas: 1000000,
-            value: 0,
+            value: Wei::zero(),
             message: PoolMsg::Token1 {},
         ),
     )
@@ -85,7 +85,7 @@ uses (evm: mut Evm)
         evm.call(
             addr: token,
             gas: 1000000,
-            value: 0,
+            value: Wei::zero(),
             message: TokenMsg::TransferFrom { sender, recipient, amount },
         ),
     )
@@ -100,7 +100,7 @@ pub contract TestUniswapV3SwapPay uses (ctx: Ctx, evm: mut Evm) {
                 .call(
                     addr: pool,
                     gas: 1000000,
-                    value: 0,
+                    value: Wei::zero(),
                     message: PoolMsg::Swap {
                         recipient,
                         zeroForOne,

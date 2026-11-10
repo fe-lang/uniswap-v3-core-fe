@@ -753,7 +753,7 @@ pub contract TickOverflowSafetyEchidnaTest uses (evm: Evm) {
                 fee_growth_global1_x128: overflow_fee_growth_global1_x128(),
                 seconds_per_liquidity_cumulative_x128: 0,
                 tick_cumulative: 0,
-                time: evm.timestamp().downcast_unchecked(),
+                time: evm.timestamp().as_seconds().downcast_unchecked(),
                 upper: false,
                 max_liquidity: OVERFLOW_MAX_LIQUIDITY,
             )
@@ -765,7 +765,7 @@ pub contract TickOverflowSafetyEchidnaTest uses (evm: Evm) {
                 fee_growth_global1_x128: overflow_fee_growth_global1_x128(),
                 seconds_per_liquidity_cumulative_x128: 0,
                 tick_cumulative: 0,
-                time: evm.timestamp().downcast_unchecked(),
+                time: evm.timestamp().as_seconds().downcast_unchecked(),
                 upper: true,
                 max_liquidity: OVERFLOW_MAX_LIQUIDITY,
             )
@@ -817,7 +817,7 @@ pub contract TickOverflowSafetyEchidnaTest uses (evm: Evm) {
                             fee_growth_global1_x128: overflow_fee_growth_global1_x128(),
                             seconds_per_liquidity_cumulative_x128: 0,
                             tick_cumulative: 0,
-                            time: evm.timestamp().downcast_unchecked(),
+                            time: evm.timestamp().as_seconds().downcast_unchecked(),
                         )
                     }
                     current_tick = next_tick
@@ -830,7 +830,7 @@ pub contract TickOverflowSafetyEchidnaTest uses (evm: Evm) {
                             fee_growth_global1_x128: overflow_fee_growth_global1_x128(),
                             seconds_per_liquidity_cumulative_x128: 0,
                             tick_cumulative: 0,
-                            time: evm.timestamp().downcast_unchecked(),
+                            time: evm.timestamp().as_seconds().downcast_unchecked(),
                         )
                     }
                     current_tick = current_tick - 1

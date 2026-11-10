@@ -1,6 +1,6 @@
 use core::abi::ByteInput
 use core::ptr::MemBuffer
-use std::evm::{Address, Call, Evm}
+use std::evm::{Address, Call, Evm, Wei}
 
 msg TokenMsg {
     #[selector = 0xa9059cbb]
@@ -13,7 +13,7 @@ pub fn safe_transfer(token: Address, to: Address, value: u256) uses (evm: mut Ev
         .try_call_into(
             addr: token,
             gas: evm.gas(),
-            value: 0,
+            value: Wei::zero(),
             message: TokenMsg::Transfer { to, value },
             ret: mut ret,
         )

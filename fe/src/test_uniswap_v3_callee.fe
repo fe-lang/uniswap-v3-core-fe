@@ -1,6 +1,6 @@
 use std::evm::encode_abi_payload
 use std::abi::sol::{self, Int24, Uint160}
-use std::evm::{Address, Ctx, Evm, Log}
+use std::evm::{Address, Ctx, Evm, Log, Wei}
 use super::libraries::tick_bitmap::int_key
 
 const MAX_I256: u256 = 0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
@@ -109,18 +109,18 @@ fn to_i256(_ value: u256) -> i256 {
 }
 
 fn as_address(_ value: u256) -> Address {
-    Address { inner: value & MASK_U160 }
+    Address::from_word_truncate(value)
 }
 
 fn address_payload(_ sender: Address) -> Bytes uses (evm: mut Evm) {
-    let payload = encode_abi_payload((sender.inner,))
+    let payload = encode_abi_payload((sender.word(),))
     Bytes::from_payload(source: payload.span())
 }
 
 fn flash_payload(sender: Address, pay0: u256, pay1: u256) -> Bytes
 uses (evm: mut Evm)
 {
-    let payload = encode_abi_payload((sender.inner, pay0, pay1))
+    let payload = encode_abi_payload((sender.word(), pay0, pay1))
     Bytes::from_payload(source: payload.span())
 }
 
@@ -134,7 +134,7 @@ fn token0(_ pool: Address) -> Address uses (evm: mut Evm) {
         evm.call(
             addr: pool,
             gas: 1000000,
-            value: 0,
+            value: Wei::zero(),
             message: PoolMsg::Token0 {},
         ),
     )
@@ -145,7 +145,7 @@ fn token1(_ pool: Address) -> Address uses (evm: mut Evm) {
         evm.call(
             addr: pool,
             gas: 1000000,
-            value: 0,
+            value: Wei::zero(),
             message: PoolMsg::Token1 {},
         ),
     )
@@ -158,7 +158,7 @@ uses (evm: mut Evm)
         evm.call(
             addr: token,
             gas: 1000000,
-            value: 0,
+            value: Wei::zero(),
             message: TokenMsg::TransferFrom { sender, recipient, amount },
         ),
     )
@@ -192,7 +192,7 @@ pub contract TestUniswapV3Callee uses (ctx: Ctx, evm: mut Evm) {
                 .call(
                     addr: pool,
                     gas: evm.gas(),
-                    value: 0,
+                    value: Wei::zero(),
                     message: PoolMsg::Swap {
                         recipient,
                         zeroForOne: true,
@@ -210,7 +210,7 @@ pub contract TestUniswapV3Callee uses (ctx: Ctx, evm: mut Evm) {
                 .call(
                     addr: pool,
                     gas: evm.gas(),
-                    value: 0,
+                    value: Wei::zero(),
                     message: PoolMsg::Swap {
                         recipient,
                         zeroForOne: true,
@@ -228,7 +228,7 @@ pub contract TestUniswapV3Callee uses (ctx: Ctx, evm: mut Evm) {
                 .call(
                     addr: pool,
                     gas: evm.gas(),
-                    value: 0,
+                    value: Wei::zero(),
                     message: PoolMsg::Swap {
                         recipient,
                         zeroForOne: false,
@@ -246,7 +246,7 @@ pub contract TestUniswapV3Callee uses (ctx: Ctx, evm: mut Evm) {
                 .call(
                     addr: pool,
                     gas: evm.gas(),
-                    value: 0,
+                    value: Wei::zero(),
                     message: PoolMsg::Swap {
                         recipient,
                         zeroForOne: false,
@@ -264,7 +264,7 @@ pub contract TestUniswapV3Callee uses (ctx: Ctx, evm: mut Evm) {
                 .call(
                     addr: pool,
                     gas: evm.gas(),
-                    value: 0,
+                    value: Wei::zero(),
                     message: PoolMsg::Swap {
                         recipient,
                         zeroForOne: true,
@@ -282,7 +282,7 @@ pub contract TestUniswapV3Callee uses (ctx: Ctx, evm: mut Evm) {
                 .call(
                     addr: pool,
                     gas: evm.gas(),
-                    value: 0,
+                    value: Wei::zero(),
                     message: PoolMsg::Swap {
                         recipient,
                         zeroForOne: false,
@@ -324,7 +324,7 @@ pub contract TestUniswapV3Callee uses (ctx: Ctx, evm: mut Evm) {
                 .call(
                     addr: pool,
                     gas: evm.gas(),
-                    value: 0,
+                    value: Wei::zero(),
                     message: PoolMsg::Mint {
                         recipient,
                         tickLower,
@@ -364,7 +364,7 @@ pub contract TestUniswapV3Callee uses (ctx: Ctx, evm: mut Evm) {
             evm.call(
                 addr: pool,
                 gas: evm.gas(),
-                value: 0,
+                value: Wei::zero(),
                 message: PoolMsg::Flash {
                     recipient,
                     amount0,

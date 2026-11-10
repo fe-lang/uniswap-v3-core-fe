@@ -35,13 +35,13 @@ fn decode_i56_word(_ word: u256) -> i256 {
     signextend(byte: 6, value: word).downcast_unchecked()
 }
 
-fn observation_slot(_ index: u256) -> u256 {
+fn observation_slot(_ index: u256) -> usize {
     assert(index < OBSERVATION_COUNT)
-    index
+    index.downcast_truncate()
 }
 
 pub fn read_observation(_ index: u256, observations: ref Observations) -> Observation {
-    let word = observations[observation_slot(index) as usize]
+    let word = observations[observation_slot(index)]
     Observation {
         block_timestamp: (word & MAX_U32).downcast_unchecked(),
         tick_cumulative: decode_i56_word(word >> 32),
@@ -64,7 +64,7 @@ fn write_observation(
         | (signed_word(tick_cumulative, bits: 56) << 32)
         | (seconds_per_liquidity_cumulative_x128 << 88)
         | (initialized_word << 248)
-    observations[observation_slot(index) as usize] = word
+    observations[observation_slot(index)] = word
 }
 
 fn state_word() -> u256 uses (store: OracleStore) {
@@ -459,17 +459,18 @@ uses (evm: Evm)
     let args_offset = evm.calldataload(4)
     assert(args_offset <= calldata_size - 36)
     let elements_offset = 4 + args_offset + 32
-    let len = evm.calldataload(elements_offset - 32)
-    assert(len <= (calldata_size - elements_offset) / 32)
+    let len_word = evm.calldataload(elements_offset - 32)
+    assert(len_word <= (calldata_size - elements_offset) / 32)
+    let len: usize = len_word.downcast_truncate()
     let second_offset = 96 + len * 32
     var out = MemBuffer::with_capacity(128 + len * 64)
     out.write_word(offset: 0, value: 64)
-    out.write_word(offset: 32, value: second_offset)
-    out.write_word(offset: 64, value: len)
-    out.write_word(offset: second_offset, value: len)
-    var i: u256 = 0
+    out.write_word(offset: 32, value: second_offset as u256)
+    out.write_word(offset: 64, value: len_word)
+    out.write_word(offset: second_offset, value: len_word)
+    var i: usize = 0
     while i < len {
-        let seconds_word = evm.calldataload(elements_offset + i * 32)
+        let seconds_word = evm.calldataload(elements_offset + (i * 32) as u256)
         let seconds_ago: u32 = seconds_word.downcast_unchecked()
         let (tick_cumulative, seconds_per_liquidity_cumulative_x128) = observe_single(
             time,

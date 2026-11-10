@@ -10,7 +10,7 @@ pub const MSG_LO: u256 = 0x4c4f0000000000000000000000000000000000000000000000000
 pub const MSG_LS: u256 = 0x4c53000000000000000000000000000000000000000000000000000000000000
 pub const MSG_NP: u256 = 0x4e50000000000000000000000000000000000000000000000000000000000000
 
-pub fn require_short(condition: bool, code: u256, len: u256) {
+pub fn require_short(condition: bool, code: u256, len: usize) {
     if !condition {
         let data = Bytes::from_word_prefix(word: code, len)
         let encoded = encode_msg_calldata(ShortError::Reason { data })

@@ -21,7 +21,7 @@ fn checked_int24_word(_ value: i256) -> u256 {
 pub fn position_key(owner: Address, tick_lower: i256, tick_upper: i256) -> u256
 uses (evm: mut Evm)
 {
-    let word = (owner.inner << 96)
+    let word = (owner.word() << 96)
         | (checked_int24_word(tick_lower) << 72)
         | (checked_int24_word(tick_upper) << 48)
     let ptr = encode_abi_payload((word,))

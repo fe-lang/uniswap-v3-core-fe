@@ -35,8 +35,8 @@ fn emit_transfer(from: Address, to: Address, amount: u256) uses (evm: mut Evm) {
     evm.log3(
         data: ptr.span().head(32),
         topic0: TRANSFER_TOPIC,
-        topic1: from.inner,
-        topic2: to.inner,
+        topic1: from.word(),
+        topic2: to.word(),
     )
 }
 
@@ -47,8 +47,8 @@ uses (evm: mut Evm)
     evm.log3(
         data: ptr.span().head(32),
         topic0: APPROVAL_TOPIC,
-        topic1: owner.inner,
-        topic2: spender.inner,
+        topic1: owner.word(),
+        topic2: spender.word(),
     )
 }
 

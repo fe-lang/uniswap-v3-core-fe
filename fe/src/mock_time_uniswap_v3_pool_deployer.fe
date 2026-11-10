@@ -1,6 +1,6 @@
 use std::evm::packed::Packed
 use std::evm::encode_abi_payload
-use std::evm::{Address, Create, Evm, Log, RawOps}
+use std::evm::{Address, Create, Evm, Log, RawOps, Wei}
 use super::libraries::tick_bitmap::int_key
 use super::mock_time_uniswap_v3_pool::MockTimeUniswapV3Pool
 
@@ -41,9 +41,9 @@ fn decode_int24_word(_ word: u256) -> i32 {
 fn store_parameters(factory: Address, token0: Address, token1: Address, fee: u32, tick_spacing: i32)
 uses (parameters: mut Parameters)
 {
-    parameters.factory = factory.inner
-    parameters.token0 = token0.inner
-    parameters.token1 = token1.inner
+    parameters.factory = factory.word()
+    parameters.token0 = token0.word()
+    parameters.token1 = token1.word()
     parameters.packed = (fee as u256) | (int24_word(tick_spacing) << 24)
 }
 
@@ -56,7 +56,7 @@ fn clear_parameters() uses (parameters: mut Parameters) {
 
 #[arithmetic(unchecked)]
 fn emit_pool_deployed(_ pool: Address) uses (evm: mut Evm) {
-    let ptr = encode_abi_payload((pool.inner,))
+    let ptr = encode_abi_payload((pool.word(),))
     evm.log1(data: ptr.span().head(32), topic0: POOL_DEPLOYED_TOPIC)
 }
 
@@ -91,22 +91,22 @@ pub contract MockTimeUniswapV3PoolDeployer uses (evm: mut Evm) {
 
         Deploy uses (mut evm, mut parameters) {
             assert(evm.calldatasize() >= 164)
-            let factory = Address { inner: evm.calldataload(4) }
-            let token0 = Address { inner: evm.calldataload(36) }
-            let token1 = Address { inner: evm.calldataload(68) }
+            let factory = Address::from_word_truncate(evm.calldataload(4))
+            let token0 = Address::from_word_truncate(evm.calldataload(36))
+            let token1 = Address::from_word_truncate(evm.calldataload(68))
             let fee: u32 = (evm.calldataload(100) & MASK_U24).downcast_unchecked()
             let tick_spacing = decode_int24_word(evm.calldataload(132))
             store_parameters(factory, token0, token1, fee, tick_spacing)
             let pool = evm
                 .create2<MockTimeUniswapV3Pool>(
-                    value: 0,
+                    value: Wei::zero(),
                     args: (),
                     salt: pool_salt(token0, token1, fee, tick_spacing),
                 )
-            assert(pool.inner != 0)
+            assert(pool.word() != 0)
             clear_parameters()
             emit_pool_deployed(pool)
-            let out = encode_abi_payload((pool.inner,))
+            let out = encode_abi_payload((pool.word(),))
             evm.return_data(data: out.span().head(32))
         }
     }

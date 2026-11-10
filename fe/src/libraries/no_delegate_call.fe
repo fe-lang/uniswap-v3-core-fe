@@ -6,7 +6,7 @@ fn check_not_delegate_call(_ original: Address) uses (ctx: Ctx) {
 }
 
 fn can_be_delegate_called() -> u256 uses (ctx: Ctx) {
-    ctx.timestamp() / 5
+    ctx.timestamp().as_seconds() / 5
 }
 
 fn cannot_be_delegate_called(_ original: Address) -> u256 uses (ctx: Ctx) {

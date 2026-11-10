@@ -1,7 +1,7 @@
 use std::evm::encode_abi_payload
 use core::ptr::MemSpan
 use std::abi::sol::{self, Int24, Uint24}
-use std::evm::{Address, Create, Ctx, Evm, Log, StorageMap}
+use std::evm::{Address, Create, Ctx, Evm, Log, StorageMap, Wei}
 use super::libraries::tick_bitmap::int_key
 use super::uniswap_v3_pool::UniswapV3Pool
 
@@ -54,13 +54,13 @@ uses (store: mut FactoryStore)
 fn get_pool(token0: Address, token1: Address, fee: Uint24) -> Address
 uses (store: FactoryStore)
 {
-    Address { inner: store.pools[token0.inner][token1.inner][fee.val as u256] & MASK_U160 }
+    Address::from_word_truncate(store.pools[token0.word()][token1.word()][fee.val as u256])
 }
 
 fn set_pool(token0: Address, token1: Address, fee: Uint24, pool: Address)
 uses (store: mut FactoryStore)
 {
-    store.pools[token0.inner][token1.inner][fee.val as u256] = pool.inner
+    store.pools[token0.word()][token1.word()][fee.val as u256] = pool.word()
 }
 
 fn set_parameters(
@@ -72,9 +72,9 @@ fn set_parameters(
 )
 uses (store: mut FactoryStore)
 {
-    store.factory = factory.inner
-    store.token0 = token0.inner
-    store.token1 = token1.inner
+    store.factory = factory.word()
+    store.token0 = token0.word()
+    store.token1 = token1.word()
     store.parameters = (fee.val as u256) | (int24_word(tick_spacing.val) << 24)
 }
 
@@ -88,7 +88,7 @@ fn clear_parameters() uses (store: mut FactoryStore) {
 fn pool_salt(token0: Address, token1: Address, fee: Uint24) -> u256
 uses (evm: mut Evm)
 {
-    let ptr = encode_abi_payload((token0.inner, token1.inner, fee.val as u256))
+    let ptr = encode_abi_payload((token0.word(), token1.word(), fee.val as u256))
     evm.keccak256(data: ptr.span().head(96))
 }
 
@@ -102,8 +102,8 @@ uses (evm: mut Evm)
     evm.log3(
         data: MemSpan::empty(),
         topic0: OWNER_CHANGED_TOPIC,
-        topic1: old_owner.inner,
-        topic2: new_owner.inner,
+        topic1: old_owner.word(),
+        topic2: new_owner.word(),
     )
 }
 
@@ -127,12 +127,12 @@ fn emit_pool_created(
 )
 uses (evm: mut Evm)
 {
-    let ptr = encode_abi_payload((int24_abi_word(tick_spacing.val), pool.inner))
+    let ptr = encode_abi_payload((int24_abi_word(tick_spacing.val), pool.word()))
     evm.log4(
         data: ptr.span().head(64),
         topic0: POOL_CREATED_TOPIC,
-        topic1: token0.inner,
-        topic2: token1.inner,
+        topic1: token0.word(),
+        topic2: token1.word(),
         topic3: fee.val as u256,
     )
 }
@@ -169,7 +169,7 @@ pub contract UniswapV3Factory uses (ctx: Ctx, evm: mut Evm) {
     {
         original = ctx.address()
         let owner = ctx.caller()
-        store.owner = owner.inner
+        store.owner = owner.word()
         emit_owner_changed(old_owner: Address::zero(), new_owner: owner)
         set_fee_amount_tick_spacing(fee: Uint24 { val: 500 }, tick_spacing: Int24 { val: 10 })
         emit_fee_amount_enabled(fee: Uint24 { val: 500 }, tick_spacing: Int24 { val: 10 })
@@ -207,7 +207,7 @@ pub contract UniswapV3Factory uses (ctx: Ctx, evm: mut Evm) {
         }
 
         GetPool { tokenA, tokenB, fee } -> u256 uses (store) {
-            get_pool(token0: tokenA, token1: tokenB, fee).inner
+            get_pool(token0: tokenA, token1: tokenB, fee).word()
         }
 
         CreatePool { tokenA, tokenB, fee } -> u256
@@ -215,7 +215,7 @@ pub contract UniswapV3Factory uses (ctx: Ctx, evm: mut Evm) {
         {
             check_not_delegate_call(original)
             assert(tokenA != tokenB)
-            let (token0, token1) = if tokenA.inner < tokenB.inner {
+            let (token0, token1) = if tokenA.word() < tokenB.word() {
                 (tokenA, tokenB)
             } else {
                 (tokenB, tokenA)
@@ -232,24 +232,28 @@ pub contract UniswapV3Factory uses (ctx: Ctx, evm: mut Evm) {
                 tick_spacing: tick_spacing,
             )
             let pool = evm
-                .create2<UniswapV3Pool>(value: 0, args: (), salt: pool_salt(token0, token1, fee))
-            assert(pool.inner != 0)
+                .create2<UniswapV3Pool>(
+                    value: Wei::zero(),
+                    args: (),
+                    salt: pool_salt(token0, token1, fee),
+                )
+            assert(pool.word() != 0)
             clear_parameters()
             set_pool(token0, token1, fee, pool)
             set_pool(token0: token1, token1: token0, fee, pool)
             emit_pool_created(token0, token1, fee, tick_spacing: tick_spacing, pool)
-            pool.inner
+            pool.word()
         }
 
         SetOwner { owner } uses (ctx, mut evm, mut store) {
-            let old_owner = Address { inner: store.owner & MASK_U160 }
+            let old_owner = Address::from_word_truncate(store.owner)
             assert(ctx.caller() == old_owner)
             emit_owner_changed(old_owner: old_owner, new_owner: owner)
-            store.owner = owner.inner
+            store.owner = owner.word()
         }
 
         EnableFeeAmount { fee, tickSpacing } uses (ctx, mut evm, mut store) {
-            assert(ctx.caller().inner == store.owner & MASK_U160)
+            assert(ctx.caller().word() == store.owner & MASK_U160)
             assert(fee.val < 1000000)
             let tick_spacing = tickSpacing.val
             assert(tick_spacing > 0 && tick_spacing < 16384)
