@@ -1,5 +1,6 @@
+use core::hint::black_box
 use std::abi::sol
-use std::evm::{Ctx, Evm}
+use std::evm::Evm
 
 const MASK_U128: u256 = 0xffffffffffffffffffffffffffffffff
 const MASK_U64: u256 = 0xffffffffffffffff
@@ -12,8 +13,8 @@ const MASK_U8: u256 = 0xff
 pub fn most_significant_bit(_ x: u256) -> u8 {
     assert(x > 0)
 
-    let mut value = x
-    let mut r: u256 = 0
+    var value = x
+    var r: u256 = 0
 
     if value >= (1 << 128) {
         value = value >> 128
@@ -55,8 +56,8 @@ pub fn most_significant_bit(_ x: u256) -> u8 {
 pub fn least_significant_bit(_ x: u256) -> u8 {
     assert(x > 0)
 
-    let mut value = x
-    let mut r: u256 = 0
+    var value = x
+    var r: u256 = 0
 
     r = 255
     if (value & MASK_U128) > 0 {
@@ -133,7 +134,7 @@ pub contract BitMathTest uses (evm: Evm) {
         uses (evm)
         {
             let gas_before = evm.gas()
-            most_significant_bit(x)
+            black_box(most_significant_bit(black_box(x)))
             gas_before - evm.gas()
         }
 
@@ -145,7 +146,7 @@ pub contract BitMathTest uses (evm: Evm) {
         uses (evm)
         {
             let gas_before = evm.gas()
-            least_significant_bit(x)
+            black_box(least_significant_bit(black_box(x)))
             gas_before - evm.gas()
         }
     }

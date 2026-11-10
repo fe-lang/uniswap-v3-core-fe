@@ -1,7 +1,6 @@
-use core::ptr
-use super::libraries::mem::{at, span}
+use std::evm::encode_abi_payload
 use std::abi::sol::{self, Uint160}
-use std::evm::{Address, Ctx, Evm, RawMem}
+use std::evm::{Address, Ctx, Evm, Wei}
 
 const MASK_U160: u256 = 0xffffffffffffffffffffffffffffffffffffffff
 
@@ -44,14 +43,13 @@ msg UniswapV3PoolSwapTestMsg {
 }
 
 fn as_address(_ value: u256) -> Address {
-    Address { inner: value & MASK_U160 }
+    Address::from_word_truncate(value)
 }
 
 fn address_payload(_ sender: Address) -> Bytes uses (evm: mut Evm) {
-    let ptr = ptr::alloc_bytes(64)
-    evm.mstore(addr: ptr, value: 32)
-    evm.mstore(addr: at(ptr, 32), value: sender.inner)
-    Bytes::from_abi_tail(data: ptr, len: 32, size: 64)
+    // SAFETY: Raw word accesses and views below stay within this 64-byte allocation.
+    let payload = encode_abi_payload((sender.word(),))
+    Bytes::from_payload(source: payload.span())
 }
 
 fn decode_sender(_ data: Bytes) -> Address uses (evm: Evm) {
@@ -64,7 +62,7 @@ fn token0(_ pool: Address) -> Address uses (evm: mut Evm) {
         evm.call(
             addr: pool,
             gas: 1000000,
-            value: 0,
+            value: Wei::zero(),
             message: PoolMsg::Token0 {},
         ),
     )
@@ -75,7 +73,7 @@ fn token1(_ pool: Address) -> Address uses (evm: mut Evm) {
         evm.call(
             addr: pool,
             gas: 1000000,
-            value: 0,
+            value: Wei::zero(),
             message: PoolMsg::Token1 {},
         ),
     )
@@ -88,7 +86,7 @@ uses (evm: mut Evm)
         evm.call(
             addr: token,
             gas: 1000000,
-            value: 0,
+            value: Wei::zero(),
             message: TokenMsg::TransferFrom { sender, recipient, amount },
         ),
     )
@@ -107,7 +105,7 @@ pub contract UniswapV3PoolSwapTest uses (ctx: Ctx, evm: mut Evm) {
                 .call(
                     addr: pool,
                     gas: evm.gas(),
-                    value: 0,
+                    value: Wei::zero(),
                     message: PoolMsg::Swap {
                         recipient: Address::zero(),
                         zeroForOne,
@@ -120,7 +118,7 @@ pub contract UniswapV3PoolSwapTest uses (ctx: Ctx, evm: mut Evm) {
                 .call(
                     addr: pool,
                     gas: 1000000,
-                    value: 0,
+                    value: Wei::zero(),
                     message: PoolMsg::Slot0 {},
                 )
             (amount0_delta, amount1_delta, Uint160 { val: sqrt_price_x96 })

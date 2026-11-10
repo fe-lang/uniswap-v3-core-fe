@@ -49,7 +49,7 @@ describe('UniswapV3Factory', () => {
   it('factory bytecode size', async () => {
     const bytecodeSize = ((await waffle.provider.getCode(factory.address)).length - 2) / 2
     if (usingFeArtifacts) {
-      expect(bytecodeSize).to.be.gt(0)
+      expect(bytecodeSize).to.be.within(1, 24576)
     } else {
       expect(bytecodeSize).to.matchSnapshot()
     }
@@ -63,7 +63,7 @@ describe('UniswapV3Factory', () => {
       : getCreate2Address(factory.address, TEST_ADDRESSES, FeeAmount.MEDIUM, poolBytecode)
     const bytecodeSize = ((await waffle.provider.getCode(poolAddress)).length - 2) / 2
     if (usingFeArtifacts) {
-      expect(bytecodeSize).to.be.gt(0)
+      expect(bytecodeSize).to.be.within(1, 24576)
     } else {
       expect(bytecodeSize).to.matchSnapshot()
     }
@@ -83,22 +83,10 @@ describe('UniswapV3Factory', () => {
     const create2Address = getCreate2Address(factory.address, tokens, feeAmount, poolBytecode)
     const create = factory.createPool(tokens[0], tokens[1], feeAmount)
 
-    let poolAddress: string
-    if (usingFeArtifacts) {
-      const receipt = await (await create).wait()
-      const event = receipt.events?.find((event) => event.event === 'PoolCreated')
-      expect(event?.args?.token0).to.eq(TEST_ADDRESSES[0])
-      expect(event?.args?.token1).to.eq(TEST_ADDRESSES[1])
-      expect(event?.args?.fee).to.eq(feeAmount)
-      expect(event?.args?.tickSpacing).to.eq(tickSpacing)
-      poolAddress = event?.args?.pool
-      expect(poolAddress).to.not.eq(constants.AddressZero)
-    } else {
-      poolAddress = create2Address
-      await expect(create)
-        .to.emit(factory, 'PoolCreated')
-        .withArgs(TEST_ADDRESSES[0], TEST_ADDRESSES[1], feeAmount, tickSpacing, create2Address)
-    }
+    const poolAddress = create2Address
+    await expect(create)
+      .to.emit(factory, 'PoolCreated')
+      .withArgs(TEST_ADDRESSES[0], TEST_ADDRESSES[1], feeAmount, tickSpacing, create2Address)
 
     await expect(factory.createPool(tokens[0], tokens[1], feeAmount)).to.be.reverted
     await expect(factory.createPool(tokens[1], tokens[0], feeAmount)).to.be.reverted
