@@ -3,7 +3,7 @@ import { ethers } from 'hardhat'
 import { SqrtPriceMathTest } from '../typechain/SqrtPriceMathTest'
 
 import { expect } from './shared/expect'
-import { getContractFactory, itWithBlackBox } from './shared/feArtifacts'
+import { getContractFactory } from './shared/feArtifacts'
 import snapshotGasCost from './shared/snapshotGasCost'
 import { encodePriceSqrt, expandTo18Decimals, MaxUint128 } from './shared/utilities'
 
@@ -97,7 +97,7 @@ describe('SqrtPriceMath', () => {
       ).to.eq(1)
     })
 
-    itWithBlackBox('zeroForOne = true gas', async () => {
+    it('zeroForOne = true gas', async () => {
       await snapshotGasCost(
         sqrtPriceMath.getGasCostOfGetNextSqrtPriceFromInput(
           encodePriceSqrt(1, 1),
@@ -108,7 +108,7 @@ describe('SqrtPriceMath', () => {
       )
     })
 
-    itWithBlackBox('zeroForOne = false gas', async () => {
+    it('zeroForOne = false gas', async () => {
       await snapshotGasCost(
         sqrtPriceMath.getGasCostOfGetNextSqrtPriceFromInput(
           encodePriceSqrt(1, 1),
@@ -215,7 +215,7 @@ describe('SqrtPriceMath', () => {
         .be.reverted
     })
 
-    itWithBlackBox('zeroForOne = true gas', async () => {
+    it('zeroForOne = true gas', async () => {
       await snapshotGasCost(
         sqrtPriceMath.getGasCostOfGetNextSqrtPriceFromOutput(
           encodePriceSqrt(1, 1),
@@ -226,7 +226,7 @@ describe('SqrtPriceMath', () => {
       )
     })
 
-    itWithBlackBox('zeroForOne = false gas', async () => {
+    it('zeroForOne = false gas', async () => {
       await snapshotGasCost(
         sqrtPriceMath.getGasCostOfGetNextSqrtPriceFromOutput(
           encodePriceSqrt(1, 1),
@@ -285,7 +285,7 @@ describe('SqrtPriceMath', () => {
       expect(amount0Up).to.eq(amount0Down.add(1))
     })
 
-    itWithBlackBox(`gas cost for amount0 where roundUp = true`, async () => {
+    it(`gas cost for amount0 where roundUp = true`, async () => {
       await snapshotGasCost(
         sqrtPriceMath.getGasCostOfGetAmount0Delta(
           encodePriceSqrt(100, 121),
@@ -296,7 +296,7 @@ describe('SqrtPriceMath', () => {
       )
     })
 
-    itWithBlackBox(`gas cost for amount0 where roundUp = true`, async () => {
+    it(`gas cost for amount0 where roundUp = true`, async () => {
       await snapshotGasCost(
         sqrtPriceMath.getGasCostOfGetAmount0Delta(
           encodePriceSqrt(100, 121),
@@ -339,7 +339,7 @@ describe('SqrtPriceMath', () => {
       expect(amount1RoundedDown).to.eq(amount1.sub(1))
     })
 
-    itWithBlackBox(`gas cost for amount0 where roundUp = true`, async () => {
+    it(`gas cost for amount0 where roundUp = true`, async () => {
       await snapshotGasCost(
         sqrtPriceMath.getGasCostOfGetAmount0Delta(
           encodePriceSqrt(100, 121),
@@ -350,7 +350,7 @@ describe('SqrtPriceMath', () => {
       )
     })
 
-    itWithBlackBox(`gas cost for amount0 where roundUp = false`, async () => {
+    it(`gas cost for amount0 where roundUp = false`, async () => {
       await snapshotGasCost(
         sqrtPriceMath.getGasCostOfGetAmount0Delta(
           encodePriceSqrt(100, 121),

@@ -2,7 +2,7 @@ import { Wallet } from 'ethers'
 import { ethers, waffle } from 'hardhat'
 import { NoDelegateCallTest } from '../typechain/NoDelegateCallTest'
 import { expect } from './shared/expect'
-import { getContractFactory, itWithBlackBox } from './shared/feArtifacts'
+import { getContractFactory } from './shared/feArtifacts'
 import snapshotGasCost from './shared/snapshotGasCost'
 
 describe('NoDelegateCall', () => {
@@ -33,7 +33,7 @@ describe('NoDelegateCall', () => {
     ;({ noDelegateCallTest: base, proxy } = await loadFixture(noDelegateCallFixture))
   })
 
-  itWithBlackBox('runtime overhead', async () => {
+  it('runtime overhead', async () => {
     await snapshotGasCost(
       (await base.getGasCostOfCannotBeDelegateCalled()).sub(await base.getGasCostOfCanBeDelegateCalled())
     )
